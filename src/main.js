@@ -1325,7 +1325,7 @@ const PLAN_X = -140;
 const PLAN_Y = 180;
 const apartmentPoint = (x, y) => ({
   x: (x + PLAN_X) * INCH,
-  z: (PLAN_Y - y) * INCH,
+  z: (y - PLAN_Y) * INCH,
 });
 
 function buildApartmentPlan() {
@@ -1372,16 +1372,26 @@ function buildApartmentPlan() {
       },
       false,
     );
+  const addFixtureBounds = (type, label, left, top, right, bottom, fixtureHeight) =>
+    addFixture(
+      type,
+      label,
+      (left + right) / 2,
+      (top + bottom) / 2,
+      right - left,
+      bottom - top,
+      fixtureHeight,
+    );
 
   // Exterior shell and balcony-facing living wall.
   const livingTop = addWall(0, 0, 145.5, 0);
   addOpening("window", livingTop, 21.5, 73.25, 48, 36);
-  addOpening("door", livingTop, 101.25, 30, 84);
+  addOpening("door", livingTop, 101.25, 34.75, 84);
   addWall(0, 0, 0, 313.25);
-  const entryWall = addWall(0, 313.25, 158.5, 313.25);
-  addOpening("door", entryWall, 113.75, 36, 84);
-  addWall(158.5, 313.25, 158.5, 339.5);
-  addWall(158.5, 339.5, 279.5, 339.5);
+  const kitchenBottom = addWall(0, 313.25, 145.5, 313.25);
+  addOpening("door", kitchenBottom, 109.5, 36, 84);
+  addWall(145.5, 313.25, 145.5, 339.5);
+  addWall(145.5, 339.5, 279.5, 339.5);
   addWall(279.5, -11.25, 279.5, 339.5);
 
   // Bedroom, hall, bathroom, laundry, and closet partitions.
@@ -1390,31 +1400,35 @@ function buildApartmentPlan() {
   const bedroomTop = state.walls.length - 1;
   addOpening("window", bedroomTop, 30, 74.5, 48, 36);
   const bedroomBottom = addWall(145.5, 142.5, 279.5, 142.5);
-  addOpening("door", bedroomBottom, 11.25, 30, 84);
-  addOpening("door", bedroomBottom, 74.5, 30, 84);
-  addWall(158.5, 184.5, 158.5, 250.5);
-  const bathBottom = addWall(158.5, 250.5, 279.5, 250.5);
-  addOpening("door", bathBottom, 49, 30, 84);
-  addWall(205.5, 250.5, 205.5, 339.5);
-  addWall(158.5, 295, 205.5, 295);
+  addOpening("door", bedroomBottom, 11.25, 30.75, 84);
+  addOpening("door", bedroomBottom, 83, 30, 84);
+  const hallSide = addWall(214.5, 142.5, 214.5, 184.5);
+  addOpening("door", hallSide, 6, 30, 84);
+  addWall(176.75, 184.5, 214.5, 184.5);
+  const bathLeft = addWall(176.75, 184.5, 176.75, 250.5);
+  addOpening("door", bathLeft, 30, 30, 84);
+  const bathBottom = addWall(176.75, 250.5, 279.5, 250.5);
+  addOpening("door", bathBottom, 25.25, 30, 84);
+  addWall(206.5, 250.5, 206.5, 339.5);
+  addWall(176.75, 284.5, 206.5, 284.5);
   addWall(0, 184.5, 27, 184.5);
 
   // Apartment-owned kitchen: L counter, island, sink, range, and refrigerator.
-  addFixture("counter", "Kitchen counter", 13, 245, 25, 128.75, 36);
-  addFixture("counter", "Kitchen counter", 54, 300.5, 82, 25, 36);
-  addFixture("island", "Kitchen island", 82, 222, 42, 76.5, 36);
-  addFixture("appliance", "Refrigerator", 126, 295, 30, 35, 72);
+  addFixtureBounds("counter", "Kitchen counter", 0, 184.5, 25, 288.25, 36);
+  addFixtureBounds("counter", "Kitchen counter", 0, 288.25, 82.75, 313.25, 36);
+  addFixtureBounds("island", "Kitchen island", 67, 195, 109, 271.5, 36);
+  addFixtureBounds("appliance", "Refrigerator", 112, 278.25, 142, 313.25, 72);
 
   // Bathroom fixtures.
-  addFixture("tub", "Bathtub", 174, 207, 30, 60, 20);
-  addFixture("vanity", "Bathroom vanity", 260, 184, 24, 58, 34, Math.PI / 2);
-  addFixture("toilet", "Toilet", 251, 232, 25, 30, 28);
+  addFixtureBounds("tub", "Bathtub", 179.75, 187.5, 209.75, 247.5, 20);
+  addFixtureBounds("vanity", "Bathroom vanity", 252.5, 150.5, 276.5, 208.5, 34);
+  addFixtureBounds("toilet", "Toilet", 244, 214, 269, 244, 28);
 
   // Laundry appliances and permanent closet storage.
-  addFixture("washer", "Washer", 181.5, 272.5, 30, 30, 38);
-  addFixture("dryer", "Dryer", 181.5, 317.5, 30, 30, 38);
-  addFixture("shelf", "Closet shelf", 267, 294, 18, 70, 18);
-  addFixture("shelf", "Closet shelf", 232, 329, 55, 18, 18);
+  addFixtureBounds("washer", "Washer", 178.5, 252.5, 204.5, 282.5, 38);
+  addFixtureBounds("dryer", "Dryer", 178.5, 286.5, 204.5, 316.5, 38);
+  addFixtureBounds("shelf", "Closet shelf", 258.5, 256.5, 276.5, 326.5, 18);
+  addFixtureBounds("shelf", "Closet shelf", 212.5, 318.5, 258.5, 336.5, 18);
 
   document.querySelector("#project-name").value = "Apartment Floor Plan";
   camera.position.set(apartmentPoint(96, 160).x, 1.7, apartmentPoint(96, 160).z);
