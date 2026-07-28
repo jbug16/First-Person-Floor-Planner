@@ -22,6 +22,9 @@ const sun = new THREE.DirectionalLight(0xffffff, 2.4);
 sun.position.set(-8, 16, 10);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.00015;
+sun.shadow.normalBias = 0.04;
+sun.shadow.radius = 2;
 sun.shadow.camera.left = -30;
 sun.shadow.camera.right = 30;
 sun.shadow.camera.top = 30;
@@ -84,25 +87,36 @@ const glassMaterial = new THREE.MeshPhysicalMaterial({
 const preview = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMaterial);
 preview.visible = false;
 scene.add(preview);
-const openingPreviewMaterial = new THREE.MeshBasicMaterial({
+const openingPreviewMaterial = new THREE.LineBasicMaterial({
   color: 0x62c98d,
   transparent: true,
-  opacity: 0.32,
+  opacity: 0.95,
   depthTest: false,
   depthWrite: false,
-  side: THREE.DoubleSide,
 });
-const openingPreview = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), openingPreviewMaterial);
+const openingPreview = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)),
+  openingPreviewMaterial,
+);
 openingPreview.renderOrder = 20;
 openingPreview.visible = false;
 scene.add(openingPreview);
-const windowAnchor = new THREE.Mesh(
-  new THREE.BoxGeometry(0.14, 0.14, 0.025),
-  new THREE.MeshBasicMaterial({
+const anchorGeometry = new THREE.BufferGeometry();
+anchorGeometry.setAttribute(
+  "position",
+  new THREE.Float32BufferAttribute(
+    [-0.09, 0, 0, 0.09, 0, 0, 0, -0.09, 0, 0, 0.09, 0],
+    3,
+  ),
+);
+const windowAnchor = new THREE.LineSegments(
+  anchorGeometry,
+  new THREE.LineBasicMaterial({
     color: 0xf2b45f,
     transparent: true,
     opacity: 0.95,
     depthTest: false,
+    depthWrite: false,
   }),
 );
 windowAnchor.renderOrder = 21;
@@ -647,28 +661,24 @@ function updatePreview() {
     const existingWindow = windowAtPoint(start);
     if (existingWindow) start.extensionOpening = existingWindow;
     state.previewWindowStart = start;
-    const marker = existingWindow
-      ? {
-          type: "window",
-          wallIndex: start.wallIndex,
-          t: existingWindow.t,
-          dimensions: {
-            width: existingWindow.width,
-            height: existingWindow.height,
-            sill: existingWindow.sill,
-          },
-          valid: true,
-          extensionHover: true,
-        }
-      : {
-          type: "window",
-          wallIndex: start.wallIndex,
-          t: start.t,
-          dimensions: { width: 0.12, height: 0.12, sill: Math.max(0, start.y - 0.06) },
-          valid: true,
-        };
-    showOpeningPreview(marker);
-    if (!existingWindow) document.querySelector("#measurement").textContent = "CLICK FIRST CORNER";
+    if (existingWindow) {
+      showOpeningPreview({
+        type: "window",
+        wallIndex: start.wallIndex,
+        t: existingWindow.t,
+        dimensions: {
+          width: existingWindow.width,
+          height: existingWindow.height,
+          sill: existingWindow.sill,
+        },
+        valid: true,
+        extensionHover: true,
+      });
+    } else {
+      const measurement = document.querySelector("#measurement");
+      measurement.textContent = "CLICK FIRST CORNER";
+      measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
+    }
     state.previewOpening = null;
     return;
   }
