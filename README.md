@@ -9,7 +9,7 @@ A first-person 3D room builder for planning real-world floor plans at human scal
 - Imperial and metric measurement display
 - Click-two-points wall construction with optional six-inch snapping
 - Adjustable wall height and thickness
-- Doors and resizable windows with live placement previews, real wall cutouts, and overlap prevention
+- Doors and two-corner, directly drawn windows with live placement previews, real wall cutouts, and overlap prevention
 - Selection and deletion
 - Undo and redo
 - Browser saves plus portable JSON exports
@@ -28,6 +28,7 @@ Open the local address shown by Vite, click **Enter project**, and use:
 - Mouse to look
 - `Shift` to sprint
 - Left click to build
+- For windows, click two opposite corners directly on the wall
 - Right click to cancel a wall
 - `1–4` to switch tools
 - `Delete` to remove a selected item
