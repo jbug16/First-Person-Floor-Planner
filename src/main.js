@@ -730,6 +730,37 @@ function updateOutputs() {
   );
 }
 
+function toggleSnap() {
+  const input = document.querySelector("#snap");
+  input.checked = !input.checked;
+  toast(`Grid snapping ${input.checked ? "on" : "off"} · G`);
+}
+
+function toggleDimensions() {
+  const input = document.querySelector("#dimensions");
+  input.checked = !input.checked;
+  if (!input.checked) document.querySelector("#measurement").classList.add("hidden");
+  toast(`Dimensions ${input.checked ? "shown" : "hidden"} · V`);
+}
+
+function toggleUnits() {
+  setUnits(state.units === "imperial" ? "metric" : "imperial");
+  toast(`${state.units === "imperial" ? "Imperial" : "Metric"} units · U`);
+}
+
+function adjustWallSetting(id, delta, name) {
+  const input = document.querySelector(`#${id}`);
+  const next = THREE.MathUtils.clamp(
+    Number(input.value) + delta,
+    Number(input.min),
+    Number(input.max),
+  );
+  input.value = String(Number(next.toFixed(3)));
+  updateOutputs();
+  const value = formatDistance(Number(input.value), state.units);
+  toast(`${name}: ${value}`);
+}
+
 document.querySelectorAll('input[type="range"]').forEach((input) => input.addEventListener("input", updateOutputs));
 document.querySelector("#undo").addEventListener("click", () => {
   if (!state.undo.length) return;
@@ -747,13 +778,55 @@ controls.addEventListener("unlock", () => document.querySelector("#start-card").
 
 addEventListener("keydown", (event) => {
   keys[event.code] = true;
+  const isTyping =
+    event.target instanceof HTMLInputElement &&
+    !["range", "checkbox"].includes(event.target.type);
+  if (isTyping && !(event.ctrlKey || event.metaKey)) return;
+
+  const command = event.ctrlKey || event.metaKey;
+  if (command && ["KeyS", "KeyO", "KeyE", "KeyZ", "KeyY"].includes(event.code)) {
+    event.preventDefault();
+  }
+  if (event.repeat) return;
+  if (command && event.code === "KeyS") return saveProject();
+  if (command && event.code === "KeyO") return loadProject();
+  if (command && event.code === "KeyE") return exportProject();
+  if (command && event.code === "KeyZ") {
+    document.querySelector(event.shiftKey ? "#redo" : "#undo").click();
+    return;
+  }
+  if (command && event.code === "KeyY") {
+    document.querySelector("#redo").click();
+    return;
+  }
+
   if (["Digit1", "Digit2", "Digit3", "Digit4"].includes(event.code)) {
     setTool({ Digit1: "wall", Digit2: "door", Digit3: "window", Digit4: "select" }[event.code]);
+    toast(`${state.tool[0].toUpperCase()}${state.tool.slice(1)} tool · ${event.code.slice(-1)}`);
   }
-  if (event.code === "Delete" || event.code === "Backspace") deleteSelected();
-  if ((event.ctrlKey || event.metaKey) && event.code === "KeyZ") {
+  if (event.code === "Delete" || event.code === "Backspace") {
     event.preventDefault();
-    document.querySelector(event.shiftKey ? "#redo" : "#undo").click();
+    deleteSelected();
+  }
+  if (event.code === "KeyZ") document.querySelector("#undo").click();
+  if (event.code === "KeyY") document.querySelector("#redo").click();
+  if (event.code === "KeyG") toggleSnap();
+  if (event.code === "KeyU") toggleUnits();
+  if (event.code === "KeyV") toggleDimensions();
+  if (event.code === "KeyC") setTool(state.tool);
+  if (event.code === "BracketLeft") {
+    adjustWallSetting(
+      event.shiftKey ? "wall-thickness" : "wall-height",
+      event.shiftKey ? -0.01 : -0.1,
+      event.shiftKey ? "Wall thickness" : "Wall height",
+    );
+  }
+  if (event.code === "BracketRight") {
+    adjustWallSetting(
+      event.shiftKey ? "wall-thickness" : "wall-height",
+      event.shiftKey ? 0.01 : 0.1,
+      event.shiftKey ? "Wall thickness" : "Wall height",
+    );
   }
 });
 addEventListener("keyup", (event) => (keys[event.code] = false));
