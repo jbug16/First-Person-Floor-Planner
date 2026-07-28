@@ -9,7 +9,7 @@ A first-person 3D room builder for planning real-world floor plans at human scal
 - Imperial and metric measurement display
 - Click-two-points wall construction with optional six-inch snapping
 - Adjustable wall height and thickness
-- Doors and two-corner, directly drawn windows with exact anchored previews and automatic extension across existing window openings
+- Doors and two-corner windows with exact anchored previews; click an existing window and move left, right, up, or down to extend that edge
 - Selection and deletion
 - Undo and redo
 - Browser saves plus portable JSON exports
