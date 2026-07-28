@@ -54,6 +54,7 @@ const state = {
   tool: "wall",
   units: "imperial",
   wallStart: null,
+  windowStart: null,
   walls: [],
   openings: [],
   selected: null,
@@ -250,11 +251,7 @@ function makeOpeningMesh(type, dimensions) {
 
 function defaultOpeningDimensions(type) {
   if (type === "door") return { width: 1.02, height: 2.12, sill: 0 };
-  return {
-    width: Number(document.querySelector("#window-width").value),
-    height: Number(document.querySelector("#window-height").value),
-    sill: Number(document.querySelector("#window-sill").value),
-  };
+  return { width: 1.2, height: 1, sill: 1 };
 }
 
 function openingPlacement(wall, wallIndex, type, t, dimensions) {
@@ -321,12 +318,106 @@ function wallHit() {
   return raycaster.intersectObjects(state.walls.map((wall) => wall.mesh), true)[0];
 }
 
+function windowPointFromHit(hit) {
+  const wall = hit.object.userData.ref;
+  const snapping = document.querySelector("#snap").checked;
+  const projected = nearestPointOnWall(hit.point, wall);
+  const length = wallLength(wall.start, wall.end);
+  return {
+    wall,
+    wallIndex: state.walls.indexOf(wall),
+    t: snapping
+      ? THREE.MathUtils.clamp(snapValue(projected.t * length, true) / length, 0, 1)
+      : projected.t,
+    y: THREE.MathUtils.clamp(snapValue(hit.point.y, snapping), 0, wall.height),
+  };
+}
+
+function windowCandidate(hit) {
+  if (!state.windowStart || !hit) return null;
+  const end = windowPointFromHit(hit);
+  if (end.wallIndex !== state.windowStart.wallIndex) return null;
+  const wall = end.wall;
+  const length = wallLength(wall.start, wall.end);
+  const width = Math.abs(end.t - state.windowStart.t) * length;
+  const height = Math.abs(end.y - state.windowStart.y);
+  const dimensions = {
+    width,
+    height,
+    sill: Math.min(end.y, state.windowStart.y),
+  };
+  const centerT = (end.t + state.windowStart.t) / 2;
+  const placement = openingPlacement(wall, end.wallIndex, "window", centerT, dimensions);
+  return {
+    type: "window",
+    wallIndex: end.wallIndex,
+    t: centerT,
+    dimensions,
+    valid: width >= 0.3 && height >= 0.3 && placement.valid,
+  };
+}
+
+function showOpeningPreview(candidate) {
+  const wall = state.walls[candidate.wallIndex];
+  const point = {
+    x: wall.start.x + (wall.end.x - wall.start.x) * candidate.t,
+    z: wall.start.z + (wall.end.z - wall.start.z) * candidate.t,
+  };
+  openingPreview.visible = true;
+  openingPreview.position.set(
+    point.x,
+    candidate.dimensions.sill + candidate.dimensions.height / 2,
+    point.z,
+  );
+  openingPreview.rotation.y = -Math.atan2(
+    wall.end.z - wall.start.z,
+    wall.end.x - wall.start.x,
+  );
+  openingPreview.scale.set(
+    Math.max(candidate.dimensions.width, 0.04),
+    Math.max(candidate.dimensions.height, 0.04),
+    wall.thickness + 0.035,
+  );
+  openingPreview.material.color.setHex(candidate.valid ? 0x62c98d : 0xd4574f);
+  state.previewOpening = candidate;
+  const measurement = document.querySelector("#measurement");
+  measurement.textContent =
+    `${formatDistance(candidate.dimensions.width, state.units)} × ${formatDistance(candidate.dimensions.height, state.units)}`;
+  measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
+}
+
 function updatePreview() {
   preview.visible = false;
   openingPreview.visible = false;
   state.previewOpening = null;
 
-  if (state.tool === "door" || state.tool === "window") {
+  if (state.tool === "window") {
+    const hit = wallHit();
+    if (!hit) {
+      document.querySelector("#measurement").classList.add("hidden");
+      return;
+    }
+    if (state.windowStart) {
+      const candidate = windowCandidate(hit);
+      if (candidate) showOpeningPreview(candidate);
+      else document.querySelector("#measurement").classList.add("hidden");
+      return;
+    }
+    const start = windowPointFromHit(hit);
+    const marker = {
+      type: "window",
+      wallIndex: start.wallIndex,
+      t: start.t,
+      dimensions: { width: 0.12, height: 0.12, sill: Math.max(0, start.y - 0.06) },
+      valid: true,
+    };
+    showOpeningPreview(marker);
+    document.querySelector("#measurement").textContent = "CLICK FIRST CORNER";
+    state.previewOpening = null;
+    return;
+  }
+
+  if (state.tool === "door") {
     const hit = wallHit();
     if (!hit) {
       document.querySelector("#measurement").classList.add("hidden");
@@ -335,35 +426,15 @@ function updatePreview() {
     const wall = hit.object.userData.ref;
     const wallIndex = state.walls.indexOf(wall);
     const projected = nearestPointOnWall(hit.point, wall);
-    const dimensions = defaultOpeningDimensions(state.tool);
-    const placement = openingPlacement(wall, wallIndex, state.tool, projected.t, dimensions);
-    const point = {
-      x: wall.start.x + (wall.end.x - wall.start.x) * placement.t,
-      z: wall.start.z + (wall.end.z - wall.start.z) * placement.t,
-    };
-    openingPreview.visible = true;
-    openingPreview.position.set(
-      point.x,
-      dimensions.sill + dimensions.height / 2,
-      point.z,
-    );
-    openingPreview.rotation.y = -Math.atan2(
-      wall.end.z - wall.start.z,
-      wall.end.x - wall.start.x,
-    );
-    openingPreview.scale.set(dimensions.width, dimensions.height, wall.thickness + 0.035);
-    openingPreview.material.color.setHex(placement.valid ? 0x62c98d : 0xd4574f);
-    state.previewOpening = {
-      type: state.tool,
+    const dimensions = defaultOpeningDimensions("door");
+    const placement = openingPlacement(wall, wallIndex, "door", projected.t, dimensions);
+    showOpeningPreview({
+      type: "door",
       wallIndex,
       t: placement.t,
       dimensions,
       valid: placement.valid,
-    };
-    const measurement = document.querySelector("#measurement");
-    measurement.textContent =
-      `${formatDistance(dimensions.width, state.units)} × ${formatDistance(dimensions.height, state.units)}`;
-    measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
+    });
     return;
   }
 
@@ -404,7 +475,25 @@ function buildAction() {
       document.querySelector("#measurement").classList.add("hidden");
       document.querySelector("#tool-help").textContent = "WALL · CLICK START POINT";
     }
-  } else if (state.tool === "door" || state.tool === "window") {
+  } else if (state.tool === "window") {
+    const hit = wallHit();
+    if (!state.windowStart) {
+      if (!hit) return toast("Aim at a wall to start the window");
+      state.windowStart = windowPointFromHit(hit);
+      document.querySelector("#tool-help").textContent =
+        "WINDOW · CLICK OPPOSITE CORNER · RIGHT CLICK CANCEL";
+      return;
+    }
+    const candidate = windowCandidate(hit);
+    if (!candidate) return toast("Finish on the same wall");
+    if (!candidate.valid) return toast("Window must be at least 1' × 1' and cannot overlap");
+    createOpening("window", candidate.wallIndex, candidate.t, true, candidate.dimensions);
+    state.windowStart = null;
+    openingPreview.visible = false;
+    document.querySelector("#measurement").classList.add("hidden");
+    document.querySelector("#tool-help").textContent = "WINDOW · CLICK FIRST CORNER";
+    toast("Window placed");
+  } else if (state.tool === "door") {
     const candidate = state.previewOpening;
     if (!candidate) return toast("Aim at a wall to place this.");
     if (!candidate.valid) return toast("That opening does not fit there");
@@ -469,16 +558,20 @@ function deleteSelected() {
 function setTool(tool) {
   state.tool = tool;
   state.wallStart = null;
+  state.windowStart = null;
   preview.visible = false;
   openingPreview.visible = false;
   state.previewOpening = null;
   document.querySelector("#wall-controls").classList.toggle("hidden", tool !== "wall");
-  document.querySelector("#window-controls").classList.toggle("hidden", tool !== "window");
   document.querySelectorAll(".tool").forEach((button) => {
     button.classList.toggle("active", button.dataset.tool === tool);
   });
   document.querySelector("#tool-help").textContent =
-    tool === "wall" ? "WALL · CLICK START POINT" : `${tool.toUpperCase()} · AIM AND CLICK`;
+    tool === "wall"
+      ? "WALL · CLICK START POINT"
+      : tool === "window"
+        ? "WINDOW · CLICK FIRST CORNER"
+        : `${tool.toUpperCase()} · AIM AND CLICK`;
 }
 
 function toast(message) {
@@ -544,18 +637,6 @@ function updateOutputs() {
     Number(document.querySelector("#wall-thickness").value),
     state.units,
   );
-  document.querySelector("#window-width-output").textContent = formatDistance(
-    Number(document.querySelector("#window-width").value),
-    state.units,
-  );
-  document.querySelector("#window-height-output").textContent = formatDistance(
-    Number(document.querySelector("#window-height").value),
-    state.units,
-  );
-  document.querySelector("#window-sill-output").textContent = formatDistance(
-    Number(document.querySelector("#window-sill").value),
-    state.units,
-  );
 }
 
 document.querySelectorAll('input[type="range"]').forEach((input) => input.addEventListener("input", updateOutputs));
@@ -590,8 +671,11 @@ addEventListener("mousedown", (event) => {
   if (event.button === 0) buildAction();
   if (event.button === 2) {
     state.wallStart = null;
+    state.windowStart = null;
     preview.visible = false;
+    openingPreview.visible = false;
     document.querySelector("#measurement").classList.add("hidden");
+    setTool(state.tool);
   }
 });
 addEventListener("contextmenu", (event) => event.preventDefault());
