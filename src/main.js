@@ -87,10 +87,12 @@ scene.add(preview);
 const openingPreviewMaterial = new THREE.MeshBasicMaterial({
   color: 0x62c98d,
   transparent: true,
-  opacity: 0.48,
+  opacity: 0.32,
   depthTest: false,
+  depthWrite: false,
+  side: THREE.DoubleSide,
 });
-const openingPreview = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), openingPreviewMaterial);
+const openingPreview = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), openingPreviewMaterial);
 openingPreview.renderOrder = 20;
 openingPreview.visible = false;
 scene.add(openingPreview);
@@ -569,7 +571,7 @@ function showOpeningPreview(candidate) {
   openingPreview.scale.set(
     Math.max(candidate.dimensions.width, 0.04),
     Math.max(candidate.dimensions.height, 0.04),
-    0.018,
+    1,
   );
   openingPreview.material.color.setHex(
     candidate.extensionHover ? 0x4ba8d1 : candidate.valid ? 0x62c98d : 0xd4574f,
