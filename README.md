@@ -30,7 +30,8 @@ Open the local address shown by Vite, click **Enter project**, and use:
 - Left click to build
 - For windows, click two opposite corners directly on the wall
 - Right click to cancel a wall
-- `1–4` to switch tools
+- `1–4` to switch between Wall, Door, Window, and Delete
+- In Delete mode, hover an item for a red outline and click to remove it
 - `Z` / `Y` to undo and redo
 - `G` to toggle grid snapping
 - `U` to switch imperial/metric units
