@@ -156,6 +156,7 @@ input[type="range"] { width: 100%; margin: 9px 0 14px; accent-color: #d89549; }
   color: #17191c;
   background: #e5aa68;
   font: 11px DM Mono;
+  white-space: nowrap;
   box-shadow: 0 3px 12px #1116;
 }
 .toast {
