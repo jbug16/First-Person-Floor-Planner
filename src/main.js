@@ -104,6 +104,7 @@ const state = {
   windowStart: null,
   walls: [],
   openings: [],
+  fixtures: [],
   selected: null,
   hoveredDelete: null,
   undo: [],
@@ -128,6 +129,19 @@ const glassMaterial = new THREE.MeshPhysicalMaterial({
   opacity: 0.38,
   roughness: 0.1,
   transmission: 0.35,
+});
+const fixtureMaterial = new THREE.MeshStandardMaterial({
+  color: 0x477e93,
+  roughness: 0.72,
+});
+const fixtureTopMaterial = new THREE.MeshStandardMaterial({
+  color: 0x9fc1cc,
+  roughness: 0.48,
+});
+const applianceMaterial = new THREE.MeshStandardMaterial({
+  color: 0x738b93,
+  roughness: 0.42,
+  metalness: 0.16,
 });
 
 const preview = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMaterial);
@@ -180,6 +194,19 @@ function snapshot() {
       height,
       sill,
     })),
+    fixtures: state.fixtures.map(
+      ({ type, label, x, z, width, depth, height, rotation, locked }) => ({
+        type,
+        label,
+        x,
+        z,
+        width,
+        depth,
+        height,
+        rotation,
+        locked,
+      }),
+    ),
   });
 }
 
@@ -195,8 +222,13 @@ function clearObjects() {
     wall.mesh.traverse((child) => child.geometry?.dispose());
   });
   state.openings.forEach((opening) => scene.remove(opening.mesh));
+  state.fixtures.forEach((fixture) => {
+    scene.remove(fixture.mesh);
+    fixture.mesh.traverse((child) => child.geometry?.dispose());
+  });
   state.walls = [];
   state.openings = [];
+  state.fixtures = [];
   colliders.length = 0;
 }
 
@@ -208,7 +240,80 @@ function restore(serialized) {
   data.openings.forEach((opening) =>
     createOpening(opening.type, opening.wallIndex, opening.t, false, opening),
   );
+  (data.fixtures || []).forEach((fixture) => createFixture(fixture, false));
   state.hoveredDelete = null;
+}
+
+function fixtureBox(group, width, height, depth, y, material = fixtureMaterial) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+  mesh.position.y = y;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+  return mesh;
+}
+
+function makeFixtureMesh(fixture) {
+  const group = new THREE.Group();
+  if (fixture.type === "toilet") {
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(fixture.width * 0.34, fixture.width * 0.42, 0.42, 24),
+      fixtureTopMaterial,
+    );
+    base.scale.z = 1.35;
+    base.position.set(0, 0.21, fixture.depth * 0.12);
+    group.add(base);
+    fixtureBox(group, fixture.width * 0.82, 0.68, fixture.depth * 0.34, 0.34, applianceMaterial)
+      .position.z = -fixture.depth * 0.31;
+  } else if (fixture.type === "tub") {
+    fixtureBox(group, fixture.width, 0.48, fixture.depth, 0.24);
+    fixtureBox(
+      group,
+      fixture.width * 0.76,
+      0.07,
+      fixture.depth * 0.82,
+      0.5,
+      new THREE.MeshStandardMaterial({ color: 0xb9dbe4, roughness: 0.25 }),
+    );
+  } else if (fixture.type === "washer" || fixture.type === "dryer") {
+    fixtureBox(group, fixture.width, fixture.height, fixture.depth, fixture.height / 2, applianceMaterial);
+    const door = new THREE.Mesh(
+      new THREE.CylinderGeometry(fixture.width * 0.27, fixture.width * 0.27, 0.035, 24),
+      frameMaterial,
+    );
+    door.rotation.x = Math.PI / 2;
+    door.position.set(0, fixture.height * 0.46, fixture.depth / 2 + 0.02);
+    group.add(door);
+  } else {
+    fixtureBox(group, fixture.width, fixture.height, fixture.depth, fixture.height / 2);
+    if (["counter", "island", "vanity"].includes(fixture.type)) {
+      fixtureBox(
+        group,
+        fixture.width + 0.035,
+        0.055,
+        fixture.depth + 0.035,
+        fixture.height + 0.0275,
+        fixtureTopMaterial,
+      );
+    }
+  }
+  return group;
+}
+
+function createFixture(data, saveHistory = true) {
+  if (saveHistory) recordHistory();
+  const fixture = { locked: true, rotation: 0, ...data };
+  const mesh = makeFixtureMesh(fixture);
+  mesh.position.set(fixture.x, 0, fixture.z);
+  mesh.rotation.y = fixture.rotation;
+  mesh.userData = { kind: "fixture", ref: fixture, locked: true };
+  mesh.traverse((child) => {
+    child.userData = { kind: "fixture", ref: fixture, locked: true };
+  });
+  fixture.mesh = mesh;
+  state.fixtures.push(fixture);
+  scene.add(mesh);
+  return fixture;
 }
 
 function createWall(start, end, height, thickness, saveHistory = true) {
@@ -1027,7 +1132,7 @@ function loadProject() {
 function exportProject() {
   const payload = {
     name: document.querySelector("#project-name").value,
-    scale: "1 unit = 1 meter",
+    scale: "1 world unit = 1 meter; imperial grid = 1 foot",
     ...JSON.parse(snapshot()),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -1215,10 +1320,108 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-createWall({ x: -3.05, z: 0 }, { x: 3.05, z: 0 }, 2.44, 0.15, false);
-createWall({ x: -3.05, z: 0 }, { x: -3.05, z: -4.57 }, 2.44, 0.15, false);
-createOpening("door", 0, 0.72, false);
-createOpening("window", 1, 0.48, false);
+const INCH = 0.0254;
+const PLAN_X = -140;
+const PLAN_Y = 180;
+const apartmentPoint = (x, y) => ({
+  x: (x + PLAN_X) * INCH,
+  z: (PLAN_Y - y) * INCH,
+});
+
+function buildApartmentPlan() {
+  const height = 108 * INCH;
+  const thickness = 6 * INCH;
+  const addWall = (x1, y1, x2, y2) => {
+    const wall = createWall(
+      apartmentPoint(x1, y1),
+      apartmentPoint(x2, y2),
+      height,
+      thickness,
+      false,
+    );
+    return state.walls.indexOf(wall);
+  };
+  const addOpening = (type, wallIndex, offset, width, openingHeight, sill = 0) => {
+    const wall = state.walls[wallIndex];
+    const lengthInches = wallLength(wall.start, wall.end) / INCH;
+    createOpening(
+      type,
+      wallIndex,
+      (offset + width / 2) / lengthInches,
+      false,
+      {
+        width: width * INCH,
+        height: openingHeight * INCH,
+        sill: sill * INCH,
+      },
+      false,
+    );
+  };
+  const addFixture = (type, label, x, y, width, depth, fixtureHeight, rotation = 0) =>
+    createFixture(
+      {
+        type,
+        label,
+        x: apartmentPoint(x, y).x,
+        z: apartmentPoint(x, y).z,
+        width: width * INCH,
+        depth: depth * INCH,
+        height: fixtureHeight * INCH,
+        rotation,
+        locked: true,
+      },
+      false,
+    );
+
+  // Exterior shell and balcony-facing living wall.
+  const livingTop = addWall(0, 0, 145.5, 0);
+  addOpening("window", livingTop, 21.5, 73.25, 48, 36);
+  addOpening("door", livingTop, 101.25, 30, 84);
+  addWall(0, 0, 0, 313.25);
+  const entryWall = addWall(0, 313.25, 158.5, 313.25);
+  addOpening("door", entryWall, 113.75, 36, 84);
+  addWall(158.5, 313.25, 158.5, 339.5);
+  addWall(158.5, 339.5, 279.5, 339.5);
+  addWall(279.5, -11.25, 279.5, 339.5);
+
+  // Bedroom, hall, bathroom, laundry, and closet partitions.
+  addWall(145.5, -11.25, 145.5, 142.5);
+  addWall(145.5, -11.25, 279.5, -11.25);
+  const bedroomTop = state.walls.length - 1;
+  addOpening("window", bedroomTop, 30, 74.5, 48, 36);
+  const bedroomBottom = addWall(145.5, 142.5, 279.5, 142.5);
+  addOpening("door", bedroomBottom, 11.25, 30, 84);
+  addOpening("door", bedroomBottom, 74.5, 30, 84);
+  addWall(158.5, 184.5, 158.5, 250.5);
+  const bathBottom = addWall(158.5, 250.5, 279.5, 250.5);
+  addOpening("door", bathBottom, 49, 30, 84);
+  addWall(205.5, 250.5, 205.5, 339.5);
+  addWall(158.5, 295, 205.5, 295);
+  addWall(0, 184.5, 27, 184.5);
+
+  // Apartment-owned kitchen: L counter, island, sink, range, and refrigerator.
+  addFixture("counter", "Kitchen counter", 13, 245, 25, 128.75, 36);
+  addFixture("counter", "Kitchen counter", 54, 300.5, 82, 25, 36);
+  addFixture("island", "Kitchen island", 82, 222, 42, 76.5, 36);
+  addFixture("appliance", "Refrigerator", 126, 295, 30, 35, 72);
+
+  // Bathroom fixtures.
+  addFixture("tub", "Bathtub", 174, 207, 30, 60, 20);
+  addFixture("vanity", "Bathroom vanity", 260, 184, 24, 58, 34, Math.PI / 2);
+  addFixture("toilet", "Toilet", 251, 232, 25, 30, 28);
+
+  // Laundry appliances and permanent closet storage.
+  addFixture("washer", "Washer", 181.5, 272.5, 30, 30, 38);
+  addFixture("dryer", "Dryer", 181.5, 317.5, 30, 30, 38);
+  addFixture("shelf", "Closet shelf", 267, 294, 18, 70, 18);
+  addFixture("shelf", "Closet shelf", 232, 329, 55, 18, 18);
+
+  document.querySelector("#project-name").value = "Apartment Floor Plan";
+  camera.position.set(apartmentPoint(96, 160).x, 1.7, apartmentPoint(96, 160).z);
+  camera.lookAt(apartmentPoint(96, 70).x, 1.7, apartmentPoint(96, 70).z);
+}
+
+buildApartmentPlan();
 state.undo.length = 0;
 rebuildGrid(state.units);
 updateOutputs();
