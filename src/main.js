@@ -254,11 +254,12 @@ function defaultOpeningDimensions(type) {
   return { width: 1.2, height: 1, sill: 1 };
 }
 
-function openingPlacement(wall, wallIndex, type, t, dimensions) {
+function openingPlacement(wall, wallIndex, type, t, dimensions, ignoredOpenings = []) {
   const length = wallLength(wall.start, wall.end);
   const halfT = dimensions.width / 2 / length;
   const clampedT = THREE.MathUtils.clamp(t, halfT, 1 - halfT);
   const overlaps = state.openings.some((opening) => {
+    if (ignoredOpenings.includes(opening)) return false;
     if (opening.wallIndex !== wallIndex) return false;
     return Math.abs(opening.t - clampedT) * length <
       (dimensions.width + opening.width) / 2 + 0.12;
@@ -272,23 +273,87 @@ function openingPlacement(wall, wallIndex, type, t, dimensions) {
   };
 }
 
-function createOpening(type, wallIndex, t, saveHistory = true, savedDimensions = null) {
+function mergedWindow(wallIndex, t, dimensions) {
+  const wall = state.walls[wallIndex];
+  const length = wallLength(wall.start, wall.end);
+  let left = t * length - dimensions.width / 2;
+  let right = t * length + dimensions.width / 2;
+  let bottom = dimensions.sill;
+  let top = dimensions.sill + dimensions.height;
+  const merged = [];
+
+  let foundMore = true;
+  while (foundMore) {
+    foundMore = false;
+    state.openings.forEach((opening) => {
+      if (opening.type !== "window" || opening.wallIndex !== wallIndex || merged.includes(opening)) {
+        return;
+      }
+      const openingLeft = opening.t * length - opening.width / 2;
+      const openingRight = opening.t * length + opening.width / 2;
+      const openingBottom = opening.sill;
+      const openingTop = opening.sill + opening.height;
+      const horizontallyOverlaps = left <= openingRight && right >= openingLeft;
+      const verticallyOverlaps = bottom <= openingTop && top >= openingBottom;
+      if (horizontallyOverlaps && verticallyOverlaps) {
+        merged.push(opening);
+        left = Math.min(left, openingLeft);
+        right = Math.max(right, openingRight);
+        bottom = Math.min(bottom, openingBottom);
+        top = Math.max(top, openingTop);
+        foundMore = true;
+      }
+    });
+  }
+
+  return {
+    t: (left + right) / 2 / length,
+    dimensions: { width: right - left, height: top - bottom, sill: bottom },
+    merged,
+  };
+}
+
+function createOpening(
+  type,
+  wallIndex,
+  t,
+  saveHistory = true,
+  savedDimensions = null,
+  mergeWindows = saveHistory,
+) {
   const wall = state.walls[wallIndex];
   if (!wall) return;
-  const dimensions = savedDimensions?.width
+  let dimensions = savedDimensions?.width
     ? {
         width: savedDimensions.width,
         height: savedDimensions.height,
         sill: savedDimensions.sill,
       }
     : defaultOpeningDimensions(type);
-  const placement = openingPlacement(wall, wallIndex, type, t, dimensions);
+  const mergeResult =
+    type === "window" && mergeWindows
+      ? mergedWindow(wallIndex, t, dimensions)
+      : { t, dimensions, merged: [] };
+  t = mergeResult.t;
+  dimensions = mergeResult.dimensions;
+  const placement = openingPlacement(
+    wall,
+    wallIndex,
+    type,
+    t,
+    dimensions,
+    mergeResult.merged,
+  );
   if (!placement.valid) {
     toast("That opening does not fit there");
     return;
   }
   t = placement.t;
   if (saveHistory) recordHistory();
+  mergeResult.merged.forEach((opening) => {
+    scene.remove(opening.mesh);
+    state.openings.splice(state.openings.indexOf(opening), 1);
+  });
   const point = {
     x: wall.start.x + (wall.end.x - wall.start.x) * t,
     z: wall.start.z + (wall.end.z - wall.start.z) * t,
@@ -347,27 +412,49 @@ function windowCandidate(hit) {
     sill: Math.min(end.y, state.windowStart.y),
   };
   const centerT = (end.t + state.windowStart.t) / 2;
-  const placement = openingPlacement(wall, end.wallIndex, "window", centerT, dimensions);
+  const mergeResult = mergedWindow(end.wallIndex, centerT, dimensions);
+  const placement = openingPlacement(
+    wall,
+    end.wallIndex,
+    "window",
+    mergeResult.t,
+    mergeResult.dimensions,
+    mergeResult.merged,
+  );
   return {
     type: "window",
     wallIndex: end.wallIndex,
-    t: centerT,
-    dimensions,
+    t: mergeResult.t,
+    dimensions: mergeResult.dimensions,
     valid: width >= 0.3 && height >= 0.3 && placement.valid,
+    merged: mergeResult.merged,
   };
 }
 
 function showOpeningPreview(candidate) {
   const wall = state.walls[candidate.wallIndex];
+  const length = wallLength(wall.start, wall.end);
   const point = {
     x: wall.start.x + (wall.end.x - wall.start.x) * candidate.t,
     z: wall.start.z + (wall.end.z - wall.start.z) * candidate.t,
   };
+  const normal = new THREE.Vector3(
+    -(wall.end.z - wall.start.z) / length,
+    0,
+    (wall.end.x - wall.start.x) / length,
+  );
+  const towardCamera = new THREE.Vector3(
+    camera.position.x - point.x,
+    0,
+    camera.position.z - point.z,
+  );
+  if (normal.dot(towardCamera) < 0) normal.negate();
+  const surfaceOffset = wall.thickness / 2 + 0.012;
   openingPreview.visible = true;
   openingPreview.position.set(
-    point.x,
+    point.x + normal.x * surfaceOffset,
     candidate.dimensions.sill + candidate.dimensions.height / 2,
-    point.z,
+    point.z + normal.z * surfaceOffset,
   );
   openingPreview.rotation.y = -Math.atan2(
     wall.end.z - wall.start.z,
@@ -376,7 +463,7 @@ function showOpeningPreview(candidate) {
   openingPreview.scale.set(
     Math.max(candidate.dimensions.width, 0.04),
     Math.max(candidate.dimensions.height, 0.04),
-    wall.thickness + 0.035,
+    0.018,
   );
   openingPreview.material.color.setHex(candidate.valid ? 0x62c98d : 0xd4574f);
   state.previewOpening = candidate;
@@ -486,13 +573,14 @@ function buildAction() {
     }
     const candidate = windowCandidate(hit);
     if (!candidate) return toast("Finish on the same wall");
-    if (!candidate.valid) return toast("Window must be at least 1' × 1' and cannot overlap");
+    if (!candidate.valid) return toast("Window must be at least 1' × 1' and fit on the wall");
+    const isExtending = candidate.merged.length > 0;
     createOpening("window", candidate.wallIndex, candidate.t, true, candidate.dimensions);
     state.windowStart = null;
     openingPreview.visible = false;
     document.querySelector("#measurement").classList.add("hidden");
     document.querySelector("#tool-help").textContent = "WINDOW · CLICK FIRST CORNER";
-    toast("Window placed");
+    toast(isExtending ? "Window extended" : "Window placed");
   } else if (state.tool === "door") {
     const candidate = state.previewOpening;
     if (!candidate) return toast("Aim at a wall to place this.");
@@ -543,6 +631,9 @@ function deleteSelected() {
           type: opening.type,
           wallIndex: opening.wallIndex > index ? opening.wallIndex - 1 : opening.wallIndex,
           t: opening.t,
+          width: opening.width,
+          height: opening.height,
+          sill: opening.sill,
         })),
     };
     restore(JSON.stringify(nextData));
