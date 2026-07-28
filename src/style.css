@@ -117,7 +117,13 @@ kbd {
 .wall-icon { border: 4px solid currentColor; border-left-width: 7px; }
 .door-icon { border: 3px solid currentColor; border-bottom: 0; border-radius: 14px 14px 0 0; }
 .window-icon { border: 3px solid currentColor; box-shadow: inset 10px 0 0 -8px currentColor, inset 0 10px 0 -8px currentColor; }
-.select-icon { font-size: 28px; }
+.delete-icon {
+  border: 2px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+  font-size: 24px;
+  line-height: 1;
+}
 .panel-section { padding: 14px; border-top: 1px solid #3a4044; }
 .panel-section label { display: flex; justify-content: space-between; color: #aeb5b4; font-size: 10px; }
 .panel-section output { color: #e6aa67; font: 10px DM Mono; }
