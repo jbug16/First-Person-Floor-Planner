@@ -9,7 +9,7 @@ A first-person 3D room builder for planning real-world floor plans at human scal
 - Imperial and metric measurement display
 - Click-two-points wall construction with optional six-inch snapping
 - Adjustable wall height and thickness
-- Doors and windows placed directly onto walls
+- Doors and windows with real wall cutouts and overlap prevention
 - Selection and deletion
 - Undo and redo
 - Browser saves plus portable JSON exports
@@ -42,7 +42,6 @@ npm run build
 
 ## Next milestones
 
-- True wall cutouts for door and window openings
 - Collision-aware walking and door interaction
 - Click-and-drag editing with numeric dimension entry
 - Multiple floors, stairs, furniture, materials, and room labels
