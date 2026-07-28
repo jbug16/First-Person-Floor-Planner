@@ -40,11 +40,49 @@ floor.receiveShadow = true;
 floor.name = "floor";
 scene.add(floor);
 
-const grid = new THREE.GridHelper(100, 100, 0x879493, 0xb4bcba);
-grid.position.y = 0.004;
-grid.material.opacity = 0.48;
-grid.material.transparent = true;
-scene.add(grid);
+let grid;
+
+function rebuildGrid(units) {
+  if (grid) {
+    scene.remove(grid);
+    grid.geometry.dispose();
+    grid.material.dispose();
+  }
+  const spacing = units === "imperial" ? 0.3048 : 1;
+  const halfSize = 50;
+  const lineCount = Math.floor(halfSize / spacing);
+  const positions = [];
+  const colors = [];
+  const minor = new THREE.Color(0xb7bfbd);
+  const major = new THREE.Color(0x758382);
+
+  const pushLine = (x1, z1, x2, z2, color) => {
+    positions.push(x1, 0, z1, x2, 0, z2);
+    colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+  };
+
+  for (let index = -lineCount; index <= lineCount; index += 1) {
+    const position = index * spacing;
+    const color = index % 5 === 0 ? major : minor;
+    pushLine(position, -halfSize, position, halfSize, color);
+    pushLine(-halfSize, position, halfSize, position, color);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  grid = new THREE.LineSegments(
+    geometry,
+    new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.52,
+      depthWrite: false,
+    }),
+  );
+  grid.position.y = 0.004;
+  scene.add(grid);
+}
 
 const controls = new PointerLockControls(camera, document.body);
 const raycaster = new THREE.Raycaster();
@@ -424,7 +462,11 @@ function groundPoint() {
   const hit = raycaster.intersectObject(floor)[0];
   if (!hit) return null;
   const snapping = document.querySelector("#snap").checked;
-  return { x: snapValue(hit.point.x, snapping), z: snapValue(hit.point.z, snapping) };
+  const spacing = state.units === "imperial" ? 0.1524 : 0.1;
+  return {
+    x: snapValue(hit.point.x, snapping, spacing),
+    z: snapValue(hit.point.z, snapping, spacing),
+  };
 }
 
 function wallHit() {
@@ -437,13 +479,22 @@ function windowPointFromHit(hit) {
   const snapping = document.querySelector("#snap").checked;
   const projected = nearestPointOnWall(hit.point, wall);
   const length = wallLength(wall.start, wall.end);
+  const snapSpacing = state.units === "imperial" ? 0.1524 : 0.1;
   return {
     wall,
     wallIndex: state.walls.indexOf(wall),
     t: snapping
-      ? THREE.MathUtils.clamp(snapValue(projected.t * length, true) / length, 0, 1)
+      ? THREE.MathUtils.clamp(
+          snapValue(projected.t * length, true, snapSpacing) / length,
+          0,
+          1,
+        )
       : projected.t,
-    y: THREE.MathUtils.clamp(snapValue(hit.point.y, snapping), 0, wall.height),
+    y: THREE.MathUtils.clamp(
+      snapValue(hit.point.y, snapping, snapSpacing),
+      0,
+      wall.height,
+    ),
   };
 }
 
@@ -942,6 +993,9 @@ function setUnits(units) {
   state.units = units;
   document.querySelector("#imperial").classList.toggle("selected", units === "imperial");
   document.querySelector("#metric").classList.toggle("selected", units === "metric");
+  document.querySelector("#snap-label").textContent =
+    units === "imperial" ? 'Snap to 6" grid' : "Snap to 10 cm grid";
+  rebuildGrid(units);
   updateOutputs();
 }
 
@@ -987,6 +1041,111 @@ function adjustWallSetting(id, delta, name) {
   toast(`${name}: ${value}`);
 }
 
+let lastDimensionRender = 0;
+
+function wallPointToScreen(wall, distance, y) {
+  const length = wallLength(wall.start, wall.end);
+  const t = THREE.MathUtils.clamp(distance / length, 0, 1);
+  const point = new THREE.Vector3(
+    wall.start.x + (wall.end.x - wall.start.x) * t,
+    y,
+    wall.start.z + (wall.end.z - wall.start.z) * t,
+  );
+  const cameraDirection = new THREE.Vector3();
+  camera.getWorldDirection(cameraDirection);
+  if (cameraDirection.dot(point.clone().sub(camera.position)) <= 0) return null;
+  point.project(camera);
+  if (point.z < -1 || point.z > 1) return null;
+  return {
+    x: (point.x * 0.5 + 0.5) * innerWidth,
+    y: (-point.y * 0.5 + 0.5) * innerHeight,
+  };
+}
+
+function renderAimedWallDimensions() {
+  const overlay = document.querySelector("#dimension-overlay");
+  if (!controls.isLocked || !document.querySelector("#dimensions").checked) {
+    overlay.replaceChildren();
+    return;
+  }
+  const now = performance.now();
+  if (now - lastDimensionRender < 80) return;
+  lastDimensionRender = now;
+
+  const hit = wallHit();
+  if (!hit) {
+    overlay.replaceChildren();
+    return;
+  }
+  const wall = hit.object.userData.ref;
+  const wallIndex = state.walls.indexOf(wall);
+  const length = wallLength(wall.start, wall.end);
+  const openings = state.openings
+    .filter((opening) => opening.wallIndex === wallIndex)
+    .map((opening) => ({
+      ...opening,
+      left: opening.t * length - opening.width / 2,
+      right: opening.t * length + opening.width / 2,
+    }))
+    .sort((a, b) => a.left - b.left);
+  const labels = [
+    {
+      distance: length / 2,
+      y: wall.height + 0.18,
+      text: `WALL ${formatDistance(length, state.units)}`,
+      className: "total",
+    },
+  ];
+
+  let cursor = 0;
+  openings.forEach((opening) => {
+    const left = THREE.MathUtils.clamp(opening.left, 0, length);
+    const right = THREE.MathUtils.clamp(opening.right, 0, length);
+    const gap = left - cursor;
+    if (gap > 0.05) {
+      labels.push({
+        distance: cursor + gap / 2,
+        y: 0.22,
+        text: formatDistance(gap, state.units),
+        className: "gap",
+      });
+    }
+    labels.push({
+      distance: (left + right) / 2,
+      y: opening.sill + opening.height / 2,
+      text:
+        `${opening.type.toUpperCase()} ${formatDistance(opening.width, state.units)}` +
+        (opening.type === "window"
+          ? ` × ${formatDistance(opening.height, state.units)}`
+          : ""),
+      className: "opening",
+    });
+    cursor = Math.max(cursor, right);
+  });
+  const finalGap = length - cursor;
+  if (finalGap > 0.05) {
+    labels.push({
+      distance: cursor + finalGap / 2,
+      y: 0.22,
+      text: formatDistance(finalGap, state.units),
+      className: "gap",
+    });
+  }
+
+  const fragment = document.createDocumentFragment();
+  labels.forEach((label) => {
+    const screen = wallPointToScreen(wall, label.distance, label.y);
+    if (!screen) return;
+    const chip = document.createElement("span");
+    chip.className = `dimension-chip ${label.className}`;
+    chip.textContent = label.text;
+    chip.style.left = `${screen.x}px`;
+    chip.style.top = `${screen.y}px`;
+    fragment.append(chip);
+  });
+  overlay.replaceChildren(fragment);
+}
+
 document.querySelectorAll('input[type="range"]').forEach((input) => input.addEventListener("input", updateOutputs));
 document.querySelector("#undo").addEventListener("click", () => {
   if (!state.undo.length) return;
@@ -1000,7 +1159,10 @@ document.querySelector("#redo").addEventListener("click", () => {
 });
 
 controls.addEventListener("lock", () => document.querySelector("#start-card").classList.add("hidden"));
-controls.addEventListener("unlock", () => document.querySelector("#start-card").classList.remove("hidden"));
+controls.addEventListener("unlock", () => {
+  document.querySelector("#start-card").classList.remove("hidden");
+  document.querySelector("#dimension-overlay").replaceChildren();
+});
 
 addEventListener("keydown", (event) => {
   keys[event.code] = true;
@@ -1094,6 +1256,7 @@ function animate() {
     document.querySelector("#position").textContent =
       `X ${camera.position.x.toFixed(1)} · Z ${camera.position.z.toFixed(1)}`;
     updatePreview();
+    renderAimedWallDimensions();
   }
   renderer.render(scene, camera);
 }
@@ -1103,5 +1266,6 @@ createWall({ x: -3.05, z: 0 }, { x: -3.05, z: -4.57 }, 2.44, 0.15, false);
 createOpening("door", 0, 0.72, false);
 createOpening("window", 1, 0.48, false);
 state.undo.length = 0;
+rebuildGrid(state.units);
 updateOutputs();
 animate();
