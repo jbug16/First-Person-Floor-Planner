@@ -59,6 +59,7 @@ const state = {
   selected: null,
   undo: [],
   redo: [],
+  previewOpening: null,
 };
 
 const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.72 });
@@ -81,11 +82,28 @@ const glassMaterial = new THREE.MeshPhysicalMaterial({
 const preview = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMaterial);
 preview.visible = false;
 scene.add(preview);
+const openingPreviewMaterial = new THREE.MeshBasicMaterial({
+  color: 0x62c98d,
+  transparent: true,
+  opacity: 0.48,
+  depthTest: false,
+});
+const openingPreview = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), openingPreviewMaterial);
+openingPreview.renderOrder = 20;
+openingPreview.visible = false;
+scene.add(openingPreview);
 
 function snapshot() {
   return JSON.stringify({
     walls: state.walls.map(({ start, end, height, thickness }) => ({ start, end, height, thickness })),
-    openings: state.openings.map(({ type, wallIndex, t }) => ({ type, wallIndex, t })),
+    openings: state.openings.map(({ type, wallIndex, t, width, height, sill }) => ({
+      type,
+      wallIndex,
+      t,
+      width,
+      height,
+      sill,
+    })),
   });
 }
 
@@ -110,7 +128,9 @@ function restore(serialized) {
   const data = JSON.parse(serialized);
   clearObjects();
   data.walls.forEach((wall) => createWall(wall.start, wall.end, wall.height, wall.thickness, false));
-  data.openings.forEach((opening) => createOpening(opening.type, opening.wallIndex, opening.t, false));
+  data.openings.forEach((opening) =>
+    createOpening(opening.type, opening.wallIndex, opening.t, false, opening),
+  );
 }
 
 function createWall(start, end, height, thickness, saveHistory = true) {
@@ -152,9 +172,9 @@ function rebuildWallMesh(wall) {
     .filter((opening) => opening.wallIndex === wallIndex)
     .map((opening) => ({
       ...opening,
-      width: opening.type === "door" ? 1.02 : 1.34,
-      bottom: opening.type === "door" ? 0 : 1.0,
-      top: opening.type === "door" ? 2.12 : 2.1,
+      width: opening.width,
+      bottom: opening.sill,
+      top: opening.sill + opening.height,
       center: opening.t * length - length / 2,
     }))
     .sort((a, b) => a.center - b.center);
@@ -182,30 +202,42 @@ function rebuildWallMesh(wall) {
   addWallSegment(wall, length / 2 - cursor, wall.height, (cursor + length / 2) / 2, wall.height / 2);
 }
 
-function makeOpeningMesh(type) {
+function makeOpeningMesh(type, dimensions) {
   const group = new THREE.Group();
   if (type === "door") {
-    const door = new THREE.Mesh(new THREE.BoxGeometry(0.86, 2.04, 0.055), doorMaterial);
-    door.position.y = 1.02;
+    const door = new THREE.Mesh(
+      new THREE.BoxGeometry(dimensions.width - 0.16, dimensions.height - 0.08, 0.055),
+      doorMaterial,
+    );
+    door.position.y = dimensions.height / 2 - 0.04;
     door.castShadow = true;
     group.add(door);
-    const header = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.08, 0.1), frameMaterial);
-    header.position.y = 2.08;
+    const header = new THREE.Mesh(
+      new THREE.BoxGeometry(dimensions.width, 0.08, 0.1),
+      frameMaterial,
+    );
+    header.position.y = dimensions.height - 0.04;
     group.add(header);
-    for (const x of [-0.47, 0.47]) {
-      const side = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.08, 0.1), frameMaterial);
-      side.position.set(x, 1.04, 0);
+    for (const x of [-dimensions.width / 2 + 0.04, dimensions.width / 2 - 0.04]) {
+      const side = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, dimensions.height, 0.1),
+        frameMaterial,
+      );
+      side.position.set(x, dimensions.height / 2, 0);
       group.add(side);
     }
   } else {
-    const glass = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 0.04), glassMaterial);
-    glass.position.y = 1.55;
+    const glass = new THREE.Mesh(
+      new THREE.BoxGeometry(dimensions.width - 0.14, dimensions.height - 0.14, 0.04),
+      glassMaterial,
+    );
+    glass.position.y = dimensions.sill + dimensions.height / 2;
     group.add(glass);
     const parts = [
-      [1.34, 0.07, 0.1, 0, 1.02],
-      [1.34, 0.07, 0.1, 0, 2.08],
-      [0.07, 1.13, 0.1, -0.635, 1.55],
-      [0.07, 1.13, 0.1, 0.635, 1.55],
+      [dimensions.width, 0.07, 0.1, 0, dimensions.sill + 0.035],
+      [dimensions.width, 0.07, 0.1, 0, dimensions.sill + dimensions.height - 0.035],
+      [0.07, dimensions.height, 0.1, -dimensions.width / 2 + 0.035, dimensions.sill + dimensions.height / 2],
+      [0.07, dimensions.height, 0.1, dimensions.width / 2 - 0.035, dimensions.sill + dimensions.height / 2],
     ];
     parts.forEach(([w, h, d, x, y]) => {
       const frame = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMaterial);
@@ -216,33 +248,60 @@ function makeOpeningMesh(type) {
   return group;
 }
 
-function createOpening(type, wallIndex, t, saveHistory = true) {
-  const wall = state.walls[wallIndex];
-  if (!wall) return;
-  const openingWidth = type === "door" ? 1.02 : 1.34;
+function defaultOpeningDimensions(type) {
+  if (type === "door") return { width: 1.02, height: 2.12, sill: 0 };
+  return {
+    width: Number(document.querySelector("#window-width").value),
+    height: Number(document.querySelector("#window-height").value),
+    sill: Number(document.querySelector("#window-sill").value),
+  };
+}
+
+function openingPlacement(wall, wallIndex, type, t, dimensions) {
   const length = wallLength(wall.start, wall.end);
-  const halfT = openingWidth / 2 / length;
-  t = THREE.MathUtils.clamp(t, halfT, 1 - halfT);
+  const halfT = dimensions.width / 2 / length;
+  const clampedT = THREE.MathUtils.clamp(t, halfT, 1 - halfT);
   const overlaps = state.openings.some((opening) => {
     if (opening.wallIndex !== wallIndex) return false;
-    const existingWidth = opening.type === "door" ? 1.02 : 1.34;
-    return Math.abs(opening.t - t) * length < (openingWidth + existingWidth) / 2 + 0.12;
+    return Math.abs(opening.t - clampedT) * length <
+      (dimensions.width + opening.width) / 2 + 0.12;
   });
-  if (overlaps) {
-    toast("That opening is too close to another one");
+  return {
+    t: clampedT,
+    valid:
+      dimensions.width <= length &&
+      dimensions.sill + dimensions.height <= wall.height &&
+      !overlaps,
+  };
+}
+
+function createOpening(type, wallIndex, t, saveHistory = true, savedDimensions = null) {
+  const wall = state.walls[wallIndex];
+  if (!wall) return;
+  const dimensions = savedDimensions?.width
+    ? {
+        width: savedDimensions.width,
+        height: savedDimensions.height,
+        sill: savedDimensions.sill,
+      }
+    : defaultOpeningDimensions(type);
+  const placement = openingPlacement(wall, wallIndex, type, t, dimensions);
+  if (!placement.valid) {
+    toast("That opening does not fit there");
     return;
   }
+  t = placement.t;
   if (saveHistory) recordHistory();
   const point = {
     x: wall.start.x + (wall.end.x - wall.start.x) * t,
     z: wall.start.z + (wall.end.z - wall.start.z) * t,
   };
-  const mesh = makeOpeningMesh(type);
+  const mesh = makeOpeningMesh(type, dimensions);
   mesh.position.set(point.x, 0, point.z);
   mesh.rotation.y = -Math.atan2(wall.end.z - wall.start.z, wall.end.x - wall.start.x);
   mesh.userData = { kind: "opening" };
   scene.add(mesh);
-  const opening = { type, wallIndex, t, mesh };
+  const opening = { type, wallIndex, t, ...dimensions, mesh };
   mesh.traverse((child) => (child.userData.ref = opening));
   state.openings.push(opening);
   rebuildWallMesh(wall);
@@ -263,8 +322,53 @@ function wallHit() {
 }
 
 function updatePreview() {
+  preview.visible = false;
+  openingPreview.visible = false;
+  state.previewOpening = null;
+
+  if (state.tool === "door" || state.tool === "window") {
+    const hit = wallHit();
+    if (!hit) {
+      document.querySelector("#measurement").classList.add("hidden");
+      return;
+    }
+    const wall = hit.object.userData.ref;
+    const wallIndex = state.walls.indexOf(wall);
+    const projected = nearestPointOnWall(hit.point, wall);
+    const dimensions = defaultOpeningDimensions(state.tool);
+    const placement = openingPlacement(wall, wallIndex, state.tool, projected.t, dimensions);
+    const point = {
+      x: wall.start.x + (wall.end.x - wall.start.x) * placement.t,
+      z: wall.start.z + (wall.end.z - wall.start.z) * placement.t,
+    };
+    openingPreview.visible = true;
+    openingPreview.position.set(
+      point.x,
+      dimensions.sill + dimensions.height / 2,
+      point.z,
+    );
+    openingPreview.rotation.y = -Math.atan2(
+      wall.end.z - wall.start.z,
+      wall.end.x - wall.start.x,
+    );
+    openingPreview.scale.set(dimensions.width, dimensions.height, wall.thickness + 0.035);
+    openingPreview.material.color.setHex(placement.valid ? 0x62c98d : 0xd4574f);
+    state.previewOpening = {
+      type: state.tool,
+      wallIndex,
+      t: placement.t,
+      dimensions,
+      valid: placement.valid,
+    };
+    const measurement = document.querySelector("#measurement");
+    measurement.textContent =
+      `${formatDistance(dimensions.width, state.units)} × ${formatDistance(dimensions.height, state.units)}`;
+    measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
+    return;
+  }
+
   if (state.tool !== "wall" || !state.wallStart) {
-    preview.visible = false;
+    document.querySelector("#measurement").classList.add("hidden");
     return;
   }
   const end = groundPoint();
@@ -301,11 +405,16 @@ function buildAction() {
       document.querySelector("#tool-help").textContent = "WALL · CLICK START POINT";
     }
   } else if (state.tool === "door" || state.tool === "window") {
-    const hit = wallHit();
-    if (!hit) return toast("Aim at a wall to place this.");
-    const wall = hit.object.userData.ref;
-    const point = nearestPointOnWall(hit.point, wall);
-    createOpening(state.tool, state.walls.indexOf(wall), point.t);
+    const candidate = state.previewOpening;
+    if (!candidate) return toast("Aim at a wall to place this.");
+    if (!candidate.valid) return toast("That opening does not fit there");
+    createOpening(
+      candidate.type,
+      candidate.wallIndex,
+      candidate.t,
+      true,
+      candidate.dimensions,
+    );
     toast(`${state.tool === "door" ? "Door" : "Window"} placed`);
   } else {
     selectAtCrosshair();
@@ -361,6 +470,10 @@ function setTool(tool) {
   state.tool = tool;
   state.wallStart = null;
   preview.visible = false;
+  openingPreview.visible = false;
+  state.previewOpening = null;
+  document.querySelector("#wall-controls").classList.toggle("hidden", tool !== "wall");
+  document.querySelector("#window-controls").classList.toggle("hidden", tool !== "window");
   document.querySelectorAll(".tool").forEach((button) => {
     button.classList.toggle("active", button.dataset.tool === tool);
   });
@@ -429,6 +542,18 @@ function updateOutputs() {
   );
   document.querySelector("#thickness-output").textContent = formatDistance(
     Number(document.querySelector("#wall-thickness").value),
+    state.units,
+  );
+  document.querySelector("#window-width-output").textContent = formatDistance(
+    Number(document.querySelector("#window-width").value),
+    state.units,
+  );
+  document.querySelector("#window-height-output").textContent = formatDistance(
+    Number(document.querySelector("#window-height").value),
+    state.units,
+  );
+  document.querySelector("#window-sill-output").textContent = formatDistance(
+    Number(document.querySelector("#window-sill").value),
     state.units,
   );
 }
