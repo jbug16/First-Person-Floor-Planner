@@ -1,7 +1,7 @@
 export const GRID_METERS = 0.1524;
 
-export function snapValue(value, enabled = true) {
-  return enabled ? Math.round(value / GRID_METERS) * GRID_METERS : value;
+export function snapValue(value, enabled = true, spacing = GRID_METERS) {
+  return enabled ? Math.round(value / spacing) * spacing : value;
 }
 
 export function wallLength(start, end) {
