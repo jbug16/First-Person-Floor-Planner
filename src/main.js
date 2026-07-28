@@ -69,6 +69,7 @@ const state = {
 };
 
 const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.72 });
+const selectedMaterial = new THREE.MeshStandardMaterial({ color: 0xd9a85e, roughness: 0.65 });
 const previewMaterial = new THREE.MeshStandardMaterial({
   color: 0xd89549,
   transparent: true,
@@ -122,14 +123,6 @@ const windowAnchor = new THREE.LineSegments(
 windowAnchor.renderOrder = 21;
 windowAnchor.visible = false;
 scene.add(windowAnchor);
-const deleteBounds = new THREE.Box3();
-const deleteHighlight = new THREE.Box3Helper(deleteBounds, 0xff5b4d);
-deleteHighlight.material.depthTest = false;
-deleteHighlight.material.transparent = true;
-deleteHighlight.material.opacity = 0.95;
-deleteHighlight.renderOrder = 30;
-deleteHighlight.visible = false;
-scene.add(deleteHighlight);
 
 function snapshot() {
   return JSON.stringify({
@@ -164,13 +157,13 @@ function clearObjects() {
 
 function restore(serialized) {
   const data = JSON.parse(serialized);
+  clearDeleteHighlight();
   clearObjects();
   data.walls.forEach((wall) => createWall(wall.start, wall.end, wall.height, wall.thickness, false));
   data.openings.forEach((opening) =>
     createOpening(opening.type, opening.wallIndex, opening.t, false, opening),
   );
   state.hoveredDelete = null;
-  deleteHighlight.visible = false;
 }
 
 function createWall(start, end, height, thickness, saveHistory = true) {
@@ -805,21 +798,46 @@ function buildAction() {
 
 function updateDeleteHover() {
   raycaster.setFromCamera(pointer, camera);
-  const objects = [...state.walls.map((wall) => wall.mesh), ...state.openings.map((opening) => opening.mesh)];
-  const hit = raycaster.intersectObjects(objects, true)[0];
-  state.hoveredDelete = hit?.object.userData.ref || null;
+  const openingHit = raycaster.intersectObjects(
+    state.openings.map((opening) => opening.mesh),
+    true,
+  )[0];
+  const wallHit = raycaster.intersectObjects(
+    state.walls.map((wall) => wall.mesh),
+    true,
+  )[0];
+  const hit = openingHit || wallHit;
+  const nextTarget = hit?.object.userData.ref || null;
+  if (nextTarget === state.hoveredDelete) return;
+  clearDeleteHighlight();
+  state.hoveredDelete = nextTarget;
   if (state.hoveredDelete?.mesh) {
-    deleteBounds.setFromObject(state.hoveredDelete.mesh);
-    deleteHighlight.visible = true;
-  } else {
-    deleteHighlight.visible = false;
+    state.hoveredDelete.mesh.traverse((child) => {
+      if (!child.isMesh || child === state.hoveredDelete.hitbox) return;
+      child.userData.deleteOriginalMaterial = child.material;
+      child.material = selectedMaterial;
+    });
   }
+}
+
+function clearDeleteHighlight() {
+  if (!state.hoveredDelete?.mesh) {
+    state.hoveredDelete = null;
+    return;
+  }
+  state.hoveredDelete.mesh.traverse((child) => {
+    if (!child.userData.deleteOriginalMaterial) return;
+    child.material = child.userData.deleteOriginalMaterial;
+    delete child.userData.deleteOriginalMaterial;
+  });
+  state.hoveredDelete = null;
 }
 
 function deleteSelected() {
   const target = state.hoveredDelete || state.selected;
   if (!target) return toast("Aim at a wall, door, or window to delete it");
   recordHistory();
+  clearDeleteHighlight();
   if (target.start) {
     const index = state.walls.indexOf(target);
     const nextData = {
@@ -846,7 +864,6 @@ function deleteSelected() {
   }
   state.selected = null;
   state.hoveredDelete = null;
-  deleteHighlight.visible = false;
   toast(`${target.type || "Wall"} deleted · Z to undo`);
 }
 
@@ -859,8 +876,7 @@ function setTool(tool) {
   windowAnchor.visible = false;
   state.previewOpening = null;
   state.previewWindowStart = null;
-  state.hoveredDelete = null;
-  deleteHighlight.visible = false;
+  clearDeleteHighlight();
   document.querySelector("#wall-controls").classList.toggle("hidden", tool !== "wall");
   document.querySelectorAll(".tool").forEach((button) => {
     button.classList.toggle("active", button.dataset.tool === tool);
