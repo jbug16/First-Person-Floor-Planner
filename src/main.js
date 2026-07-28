@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
-import { formatDistance, nearestPointOnWall, snapValue, wallLength } from "./geometry.js";
+import {
+  formatDistance,
+  nearestPointOnWall,
+  snapValue,
+  wallLength,
+  wallSegmentsConflict,
+} from "./geometry.js";
 import "./style.css";
 
 const canvas = document.querySelector("#world");
@@ -104,6 +110,7 @@ const state = {
   redo: [],
   previewOpening: null,
   previewWindowStart: null,
+  previewWallValid: true,
 };
 
 const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.72 });
@@ -469,6 +476,13 @@ function groundPoint() {
   };
 }
 
+function wallPlacementIsValid(start, end) {
+  if (wallLength(start, end) < 0.3) return false;
+  return !state.walls.some((wall) =>
+    wallSegmentsConflict(start, end, wall.start, wall.end),
+  );
+}
+
 function wallHit() {
   raycaster.setFromCamera(pointer, camera);
   return raycaster.intersectObjects(state.walls.map((wall) => wall.hitbox), false)[0];
@@ -773,12 +787,15 @@ function updatePreview() {
   const length = wallLength(state.wallStart, end);
   const height = Number(document.querySelector("#wall-height").value);
   const thickness = Number(document.querySelector("#wall-thickness").value);
+  state.previewWallValid = wallPlacementIsValid(state.wallStart, end);
   preview.visible = length > 0.05;
+  preview.material.color.setHex(state.previewWallValid ? 0xd89549 : 0xd4574f);
   preview.scale.set(length, height, thickness);
   preview.position.set((state.wallStart.x + end.x) / 2, height / 2, (state.wallStart.z + end.z) / 2);
   preview.rotation.y = -Math.atan2(end.z - state.wallStart.z, end.x - state.wallStart.x);
   const measurement = document.querySelector("#measurement");
-  measurement.textContent = formatDistance(length, state.units);
+  measurement.textContent =
+    `${state.previewWallValid ? "" : "BLOCKED · "}${formatDistance(length, state.units)}`;
   measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
 }
 
@@ -790,6 +807,10 @@ function buildAction() {
       state.wallStart = point;
       document.querySelector("#tool-help").textContent = "WALL · CLICK END POINT · RIGHT CLICK CANCEL";
     } else {
+      if (!wallPlacementIsValid(state.wallStart, point)) {
+        toast("Walls cannot cross or overlap existing walls");
+        return;
+      }
       createWall(
         state.wallStart,
         point,
@@ -1019,7 +1040,10 @@ function toggleSnap() {
 function toggleDimensions() {
   const input = document.querySelector("#dimensions");
   input.checked = !input.checked;
-  if (!input.checked) document.querySelector("#measurement").classList.add("hidden");
+  if (!input.checked) {
+    document.querySelector("#measurement").classList.add("hidden");
+    clearDimensionLabels();
+  }
   toast(`Dimensions ${input.checked ? "shown" : "hidden"} · V`);
 }
 
@@ -1041,44 +1065,91 @@ function adjustWallSetting(id, delta, name) {
   toast(`${name}: ${value}`);
 }
 
-let lastDimensionRender = 0;
+const dimensionLabelGroup = new THREE.Group();
+dimensionLabelGroup.renderOrder = 25;
+scene.add(dimensionLabelGroup);
+let dimensionSignature = "";
 
-function wallPointToScreen(wall, distance, y) {
+function clearDimensionLabels() {
+  dimensionLabelGroup.children.forEach((sprite) => {
+    sprite.material.map?.dispose();
+    sprite.material.dispose();
+  });
+  dimensionLabelGroup.clear();
+  dimensionSignature = "";
+}
+
+function createDimensionSprite(text, type) {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  const fontSize = 30;
+  context.font = `500 ${fontSize}px "DM Mono", monospace`;
+  const paddingX = 18;
+  const paddingY = 10;
+  canvas.width = Math.ceil(context.measureText(text).width + paddingX * 2);
+  canvas.height = fontSize + paddingY * 2;
+  context.font = `500 ${fontSize}px "DM Mono", monospace`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+
+  const colors = {
+    total: { background: "rgba(23,26,31,0.94)", border: "#b57737", text: "#f4bc75" },
+    opening: { background: "rgba(35,48,50,0.94)", border: "#6d8587", text: "#dce8e8" },
+    gap: { background: "rgba(242,180,95,0.95)", border: "#6e481e", text: "#17191c" },
+  }[type];
+  context.fillStyle = colors.background;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = colors.border;
+  context.lineWidth = 2;
+  context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+  context.fillStyle = colors.text;
+  context.fillText(text, canvas.width / 2, canvas.height / 2 + 1);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  const height = 0.24;
+  sprite.scale.set(height * (canvas.width / canvas.height), height, 1);
+  sprite.renderOrder = 25;
+  return sprite;
+}
+
+function positionDimensionSprite(sprite, wall, distance, y) {
   const length = wallLength(wall.start, wall.end);
   const t = THREE.MathUtils.clamp(distance / length, 0, 1);
-  const point = new THREE.Vector3(
+  sprite.position.set(
     wall.start.x + (wall.end.x - wall.start.x) * t,
     y,
     wall.start.z + (wall.end.z - wall.start.z) * t,
   );
-  const cameraDirection = new THREE.Vector3();
-  camera.getWorldDirection(cameraDirection);
-  if (cameraDirection.dot(point.clone().sub(camera.position)) <= 0) return null;
-  point.project(camera);
-  if (point.z < -1 || point.z > 1) return null;
-  return {
-    x: (point.x * 0.5 + 0.5) * innerWidth,
-    y: (-point.y * 0.5 + 0.5) * innerHeight,
-  };
 }
 
 function renderAimedWallDimensions() {
-  const overlay = document.querySelector("#dimension-overlay");
   if (!controls.isLocked || !document.querySelector("#dimensions").checked) {
-    overlay.replaceChildren();
+    if (dimensionLabelGroup.children.length) clearDimensionLabels();
     return;
   }
-  const now = performance.now();
-  if (now - lastDimensionRender < 80) return;
-  lastDimensionRender = now;
 
   const hit = wallHit();
   if (!hit) {
-    overlay.replaceChildren();
+    if (dimensionLabelGroup.children.length) clearDimensionLabels();
     return;
   }
   const wall = hit.object.userData.ref;
   const wallIndex = state.walls.indexOf(wall);
+  const nextSignature = `${wallIndex}|${state.units}|${snapshot()}`;
+  if (nextSignature === dimensionSignature) return;
+  clearDimensionLabels();
+  dimensionSignature = nextSignature;
+
   const length = wallLength(wall.start, wall.end);
   const openings = state.openings
     .filter((opening) => opening.wallIndex === wallIndex)
@@ -1132,18 +1203,11 @@ function renderAimedWallDimensions() {
     });
   }
 
-  const fragment = document.createDocumentFragment();
   labels.forEach((label) => {
-    const screen = wallPointToScreen(wall, label.distance, label.y);
-    if (!screen) return;
-    const chip = document.createElement("span");
-    chip.className = `dimension-chip ${label.className}`;
-    chip.textContent = label.text;
-    chip.style.left = `${screen.x}px`;
-    chip.style.top = `${screen.y}px`;
-    fragment.append(chip);
+    const sprite = createDimensionSprite(label.text, label.className);
+    positionDimensionSprite(sprite, wall, label.distance, label.y);
+    dimensionLabelGroup.add(sprite);
   });
-  overlay.replaceChildren(fragment);
 }
 
 document.querySelectorAll('input[type="range"]').forEach((input) => input.addEventListener("input", updateOutputs));
@@ -1161,7 +1225,7 @@ document.querySelector("#redo").addEventListener("click", () => {
 controls.addEventListener("lock", () => document.querySelector("#start-card").classList.add("hidden"));
 controls.addEventListener("unlock", () => {
   document.querySelector("#start-card").classList.remove("hidden");
-  document.querySelector("#dimension-overlay").replaceChildren();
+  clearDimensionLabels();
 });
 
 addEventListener("keydown", (event) => {
