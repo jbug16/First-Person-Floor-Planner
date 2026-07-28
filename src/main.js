@@ -621,6 +621,29 @@ function windowCandidate(hit) {
   };
 }
 
+function openingClearances(candidate) {
+  const wall = state.walls[candidate.wallIndex];
+  const length = wallLength(wall.start, wall.end);
+  const left = candidate.t * length - candidate.dimensions.width / 2;
+  const right = candidate.t * length + candidate.dimensions.width / 2;
+  const ignored = candidate.merged || [];
+  let leftBoundary = 0;
+  let rightBoundary = length;
+
+  state.openings.forEach((opening) => {
+    if (opening.wallIndex !== candidate.wallIndex || ignored.includes(opening)) return;
+    const openingLeft = opening.t * length - opening.width / 2;
+    const openingRight = opening.t * length + opening.width / 2;
+    if (openingRight <= left + 1e-6) leftBoundary = Math.max(leftBoundary, openingRight);
+    if (openingLeft >= right - 1e-6) rightBoundary = Math.min(rightBoundary, openingLeft);
+  });
+
+  return {
+    left: Math.max(0, left - leftBoundary),
+    right: Math.max(0, rightBoundary - right),
+  };
+}
+
 function showOpeningPreview(candidate) {
   const wall = state.walls[candidate.wallIndex];
   const length = wallLength(wall.start, wall.end);
@@ -661,16 +684,22 @@ function showOpeningPreview(candidate) {
   state.previewOpening = candidate;
   const measurement = document.querySelector("#measurement");
   const size =
-    `${formatDistance(candidate.dimensions.width, state.units)} × ${formatDistance(candidate.dimensions.height, state.units)}`;
+    candidate.type === "door"
+      ? `DOOR ${formatDistance(candidate.dimensions.width, state.units)}`
+      : `WINDOW ${formatDistance(candidate.dimensions.width, state.units)} × ${formatDistance(candidate.dimensions.height, state.units)}`;
+  const gaps = openingClearances(candidate);
+  const spacing =
+    `← ${formatDistance(gaps.left, state.units)}  |  ${size}  |  ` +
+    `${formatDistance(gaps.right, state.units)} →`;
   measurement.textContent = candidate.extensionHover
     ? "CLICK WINDOW TO EXTEND"
     : candidate.extension
       ? candidate.extended
-        ? `EXTEND ${candidate.direction} TO ${size}`
+        ? `EXTEND ${candidate.direction} · ${spacing}`
         : "MOVE PAST A WINDOW EDGE"
       : candidate.merged?.length
-        ? `EXTEND TO ${size}`
-        : size;
+        ? `EXTEND · ${spacing}`
+        : `${candidate.valid ? "" : "BLOCKED · "}${spacing}`;
   measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
 }
 
@@ -750,7 +779,16 @@ function updatePreview() {
       });
     } else {
       const measurement = document.querySelector("#measurement");
-      measurement.textContent = "CLICK FIRST CORNER";
+      const pointGaps = openingClearances({
+        type: "window",
+        wallIndex: start.wallIndex,
+        t: start.t,
+        dimensions: { width: 0 },
+        merged: [],
+      });
+      measurement.textContent =
+        `← ${formatDistance(pointGaps.left, state.units)}  |  CLICK FIRST CORNER  |  ` +
+        `${formatDistance(pointGaps.right, state.units)} →`;
       measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
     }
     state.previewOpening = null;
@@ -1042,7 +1080,6 @@ function toggleDimensions() {
   input.checked = !input.checked;
   if (!input.checked) {
     document.querySelector("#measurement").classList.add("hidden");
-    clearDimensionLabels();
   }
   toast(`Dimensions ${input.checked ? "shown" : "hidden"} · V`);
 }
@@ -1065,151 +1102,6 @@ function adjustWallSetting(id, delta, name) {
   toast(`${name}: ${value}`);
 }
 
-const dimensionLabelGroup = new THREE.Group();
-dimensionLabelGroup.renderOrder = 25;
-scene.add(dimensionLabelGroup);
-let dimensionSignature = "";
-
-function clearDimensionLabels() {
-  dimensionLabelGroup.children.forEach((sprite) => {
-    sprite.material.map?.dispose();
-    sprite.material.dispose();
-  });
-  dimensionLabelGroup.clear();
-  dimensionSignature = "";
-}
-
-function createDimensionSprite(text, type) {
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-  const fontSize = 30;
-  context.font = `500 ${fontSize}px "DM Mono", monospace`;
-  const paddingX = 18;
-  const paddingY = 10;
-  canvas.width = Math.ceil(context.measureText(text).width + paddingX * 2);
-  canvas.height = fontSize + paddingY * 2;
-  context.font = `500 ${fontSize}px "DM Mono", monospace`;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-
-  const colors = {
-    total: { background: "rgba(23,26,31,0.94)", border: "#b57737", text: "#f4bc75" },
-    opening: { background: "rgba(35,48,50,0.94)", border: "#6d8587", text: "#dce8e8" },
-    gap: { background: "rgba(242,180,95,0.95)", border: "#6e481e", text: "#17191c" },
-  }[type];
-  context.fillStyle = colors.background;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.strokeStyle = colors.border;
-  context.lineWidth = 2;
-  context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
-  context.fillStyle = colors.text;
-  context.fillText(text, canvas.width / 2, canvas.height / 2 + 1);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.minFilter = THREE.LinearFilter;
-  const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({
-      map: texture,
-      transparent: true,
-      depthTest: false,
-      depthWrite: false,
-    }),
-  );
-  const height = 0.24;
-  sprite.scale.set(height * (canvas.width / canvas.height), height, 1);
-  sprite.renderOrder = 25;
-  return sprite;
-}
-
-function positionDimensionSprite(sprite, wall, distance, y) {
-  const length = wallLength(wall.start, wall.end);
-  const t = THREE.MathUtils.clamp(distance / length, 0, 1);
-  sprite.position.set(
-    wall.start.x + (wall.end.x - wall.start.x) * t,
-    y,
-    wall.start.z + (wall.end.z - wall.start.z) * t,
-  );
-}
-
-function renderAimedWallDimensions() {
-  if (!controls.isLocked || !document.querySelector("#dimensions").checked) {
-    if (dimensionLabelGroup.children.length) clearDimensionLabels();
-    return;
-  }
-
-  const hit = wallHit();
-  if (!hit) {
-    if (dimensionLabelGroup.children.length) clearDimensionLabels();
-    return;
-  }
-  const wall = hit.object.userData.ref;
-  const wallIndex = state.walls.indexOf(wall);
-  const nextSignature = `${wallIndex}|${state.units}|${snapshot()}`;
-  if (nextSignature === dimensionSignature) return;
-  clearDimensionLabels();
-  dimensionSignature = nextSignature;
-
-  const length = wallLength(wall.start, wall.end);
-  const openings = state.openings
-    .filter((opening) => opening.wallIndex === wallIndex)
-    .map((opening) => ({
-      ...opening,
-      left: opening.t * length - opening.width / 2,
-      right: opening.t * length + opening.width / 2,
-    }))
-    .sort((a, b) => a.left - b.left);
-  const labels = [
-    {
-      distance: length / 2,
-      y: wall.height + 0.18,
-      text: `WALL ${formatDistance(length, state.units)}`,
-      className: "total",
-    },
-  ];
-
-  let cursor = 0;
-  openings.forEach((opening) => {
-    const left = THREE.MathUtils.clamp(opening.left, 0, length);
-    const right = THREE.MathUtils.clamp(opening.right, 0, length);
-    const gap = left - cursor;
-    if (gap > 0.05) {
-      labels.push({
-        distance: cursor + gap / 2,
-        y: 0.22,
-        text: formatDistance(gap, state.units),
-        className: "gap",
-      });
-    }
-    labels.push({
-      distance: (left + right) / 2,
-      y: opening.sill + opening.height / 2,
-      text:
-        `${opening.type.toUpperCase()} ${formatDistance(opening.width, state.units)}` +
-        (opening.type === "window"
-          ? ` × ${formatDistance(opening.height, state.units)}`
-          : ""),
-      className: "opening",
-    });
-    cursor = Math.max(cursor, right);
-  });
-  const finalGap = length - cursor;
-  if (finalGap > 0.05) {
-    labels.push({
-      distance: cursor + finalGap / 2,
-      y: 0.22,
-      text: formatDistance(finalGap, state.units),
-      className: "gap",
-    });
-  }
-
-  labels.forEach((label) => {
-    const sprite = createDimensionSprite(label.text, label.className);
-    positionDimensionSprite(sprite, wall, label.distance, label.y);
-    dimensionLabelGroup.add(sprite);
-  });
-}
-
 document.querySelectorAll('input[type="range"]').forEach((input) => input.addEventListener("input", updateOutputs));
 document.querySelector("#undo").addEventListener("click", () => {
   if (!state.undo.length) return;
@@ -1225,7 +1117,6 @@ document.querySelector("#redo").addEventListener("click", () => {
 controls.addEventListener("lock", () => document.querySelector("#start-card").classList.add("hidden"));
 controls.addEventListener("unlock", () => {
   document.querySelector("#start-card").classList.remove("hidden");
-  clearDimensionLabels();
 });
 
 addEventListener("keydown", (event) => {
@@ -1320,7 +1211,6 @@ function animate() {
     document.querySelector("#position").textContent =
       `X ${camera.position.x.toFixed(1)} · Z ${camera.position.z.toFixed(1)}`;
     updatePreview();
-    renderAimedWallDimensions();
   }
   renderer.render(scene, camera);
 }
