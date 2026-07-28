@@ -5,6 +5,7 @@ import {
   formatMetric,
   nearestPointOnWall,
   snapValue,
+  wallSegmentsConflict,
   wallLength,
 } from "../src/geometry.js";
 
@@ -33,5 +34,43 @@ describe("real-scale geometry", () => {
       start: { x: 0, z: 0 },
       end: { x: 4, z: 0 },
     })).toEqual({ x: 3, z: 0, t: 0.75 });
+  });
+
+  it("blocks walls that cross or overlap existing walls", () => {
+    expect(
+      wallSegmentsConflict(
+        { x: -1, z: 0 },
+        { x: 1, z: 0 },
+        { x: 0, z: -1 },
+        { x: 0, z: 1 },
+      ),
+    ).toBe(true);
+    expect(
+      wallSegmentsConflict(
+        { x: 0, z: 0 },
+        { x: 2, z: 0 },
+        { x: 1, z: 0 },
+        { x: 3, z: 0 },
+      ),
+    ).toBe(true);
+  });
+
+  it("allows wall endpoint connections and T-junctions", () => {
+    expect(
+      wallSegmentsConflict(
+        { x: 0, z: 0 },
+        { x: 1, z: 0 },
+        { x: 1, z: 0 },
+        { x: 1, z: 1 },
+      ),
+    ).toBe(false);
+    expect(
+      wallSegmentsConflict(
+        { x: 0, z: 0 },
+        { x: 1, z: 0 },
+        { x: 1, z: -1 },
+        { x: 1, z: 1 },
+      ),
+    ).toBe(false);
   });
 });
