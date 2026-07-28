@@ -158,6 +158,33 @@ input[type="range"] { width: 100%; margin: 9px 0 14px; accent-color: #d89549; }
   font: 11px DM Mono;
   box-shadow: 0 3px 12px #1116;
 }
+#dimension-overlay {
+  position: fixed;
+  z-index: 3;
+  inset: 0;
+  pointer-events: none;
+}
+.dimension-chip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 4px 7px;
+  color: #17191c;
+  background: rgba(242, 180, 95, 0.94);
+  border: 1px solid rgba(110, 72, 30, 0.45);
+  box-shadow: 0 2px 8px #1114;
+  white-space: nowrap;
+  font: 9px DM Mono;
+}
+.dimension-chip.opening {
+  color: #dce8e8;
+  background: rgba(35, 48, 50, 0.9);
+  border-color: #6d8587;
+}
+.dimension-chip.total {
+  color: #f4bc75;
+  background: rgba(23, 26, 31, 0.92);
+  border-color: #b57737;
+}
 .toast {
   position: fixed;
   z-index: 8;
