@@ -98,7 +98,7 @@ function recordHistory() {
 function clearObjects() {
   state.walls.forEach((wall) => {
     scene.remove(wall.mesh);
-    wall.mesh.geometry.dispose();
+    wall.mesh.traverse((child) => child.geometry?.dispose());
   });
   state.openings.forEach((opening) => scene.remove(opening.mesh));
   state.walls = [];
@@ -117,17 +117,69 @@ function createWall(start, end, height, thickness, saveHistory = true) {
   const length = wallLength(start, end);
   if (length < 0.3) return;
   if (saveHistory) recordHistory();
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, height, thickness), wallMaterial.clone());
+  const mesh = new THREE.Group();
   mesh.position.set((start.x + end.x) / 2, height / 2, (start.z + end.z) / 2);
   mesh.rotation.y = -Math.atan2(end.z - start.z, end.x - start.x);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
   const wall = { start: { ...start }, end: { ...end }, height, thickness, mesh };
   mesh.userData = { kind: "wall", ref: wall };
   scene.add(mesh);
   state.walls.push(wall);
   colliders.push(mesh);
+  rebuildWallMesh(wall);
   return wall;
+}
+
+function addWallSegment(wall, width, height, centerX, centerY) {
+  if (width <= 0.01 || height <= 0.01) return;
+  const segment = new THREE.Mesh(
+    new THREE.BoxGeometry(width, height, wall.thickness),
+    wallMaterial.clone(),
+  );
+  segment.position.set(centerX, centerY - wall.height / 2, 0);
+  segment.castShadow = true;
+  segment.receiveShadow = true;
+  segment.userData = { kind: "wall", ref: wall };
+  wall.mesh.add(segment);
+}
+
+function rebuildWallMesh(wall) {
+  wall.mesh.children.forEach((child) => child.geometry?.dispose());
+  wall.mesh.clear();
+
+  const length = wallLength(wall.start, wall.end);
+  const wallIndex = state.walls.indexOf(wall);
+  const openings = state.openings
+    .filter((opening) => opening.wallIndex === wallIndex)
+    .map((opening) => ({
+      ...opening,
+      width: opening.type === "door" ? 1.02 : 1.34,
+      bottom: opening.type === "door" ? 0 : 1.0,
+      top: opening.type === "door" ? 2.12 : 2.1,
+      center: opening.t * length - length / 2,
+    }))
+    .sort((a, b) => a.center - b.center);
+
+  let cursor = -length / 2;
+  openings.forEach((opening) => {
+    const left = Math.max(-length / 2, opening.center - opening.width / 2);
+    const right = Math.min(length / 2, opening.center + opening.width / 2);
+    addWallSegment(wall, left - cursor, wall.height, (cursor + left) / 2, wall.height / 2);
+
+    if (opening.bottom > 0) {
+      addWallSegment(wall, right - left, opening.bottom, (left + right) / 2, opening.bottom / 2);
+    }
+    if (opening.top < wall.height) {
+      addWallSegment(
+        wall,
+        right - left,
+        wall.height - opening.top,
+        (left + right) / 2,
+        opening.top + (wall.height - opening.top) / 2,
+      );
+    }
+    cursor = Math.max(cursor, right);
+  });
+  addWallSegment(wall, length / 2 - cursor, wall.height, (cursor + length / 2) / 2, wall.height / 2);
 }
 
 function makeOpeningMesh(type) {
@@ -167,6 +219,19 @@ function makeOpeningMesh(type) {
 function createOpening(type, wallIndex, t, saveHistory = true) {
   const wall = state.walls[wallIndex];
   if (!wall) return;
+  const openingWidth = type === "door" ? 1.02 : 1.34;
+  const length = wallLength(wall.start, wall.end);
+  const halfT = openingWidth / 2 / length;
+  t = THREE.MathUtils.clamp(t, halfT, 1 - halfT);
+  const overlaps = state.openings.some((opening) => {
+    if (opening.wallIndex !== wallIndex) return false;
+    const existingWidth = opening.type === "door" ? 1.02 : 1.34;
+    return Math.abs(opening.t - t) * length < (openingWidth + existingWidth) / 2 + 0.12;
+  });
+  if (overlaps) {
+    toast("That opening is too close to another one");
+    return;
+  }
   if (saveHistory) recordHistory();
   const point = {
     x: wall.start.x + (wall.end.x - wall.start.x) * t,
@@ -180,6 +245,7 @@ function createOpening(type, wallIndex, t, saveHistory = true) {
   const opening = { type, wallIndex, t, mesh };
   mesh.traverse((child) => (child.userData.ref = opening));
   state.openings.push(opening);
+  rebuildWallMesh(wall);
   return opening;
 }
 
@@ -193,7 +259,7 @@ function groundPoint() {
 
 function wallHit() {
   raycaster.setFromCamera(pointer, camera);
-  return raycaster.intersectObjects(state.walls.map((wall) => wall.mesh), false)[0];
+  return raycaster.intersectObjects(state.walls.map((wall) => wall.mesh), true)[0];
 }
 
 function updatePreview() {
@@ -248,14 +314,19 @@ function buildAction() {
 
 function selectAtCrosshair() {
   raycaster.setFromCamera(pointer, camera);
-  const objects = [
-    ...state.walls.map((wall) => wall.mesh),
-    ...state.openings.flatMap((opening) => opening.mesh.children),
-  ];
-  const hit = raycaster.intersectObjects(objects, false)[0];
-  state.walls.forEach((wall) => (wall.mesh.material = wallMaterial.clone()));
+  const objects = [...state.walls.map((wall) => wall.mesh), ...state.openings.map((opening) => opening.mesh)];
+  const hit = raycaster.intersectObjects(objects, true)[0];
+  state.walls.forEach((wall) =>
+    wall.mesh.traverse((child) => {
+      if (child.isMesh) child.material = wallMaterial.clone();
+    }),
+  );
   state.selected = hit?.object.userData.ref || null;
-  if (state.selected?.mesh?.isMesh) state.selected.mesh.material = selectedMaterial;
+  if (state.selected?.start) {
+    state.selected.mesh.traverse((child) => {
+      if (child.isMesh) child.material = selectedMaterial;
+    });
+  }
   toast(state.selected ? `${state.selected.type || "Wall"} selected · Delete to remove` : "Nothing selected");
 }
 
@@ -278,8 +349,10 @@ function deleteSelected() {
     };
     restore(JSON.stringify(nextData));
   } else {
+    const wall = state.walls[state.selected.wallIndex];
     scene.remove(state.selected.mesh);
     state.openings.splice(state.openings.indexOf(state.selected), 1);
+    if (wall) rebuildWallMesh(wall);
   }
   state.selected = null;
 }
