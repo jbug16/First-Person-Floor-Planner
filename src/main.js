@@ -428,12 +428,88 @@ function windowPointFromHit(hit) {
   };
 }
 
+function windowAtPoint(point) {
+  const wall = state.walls[point.wallIndex];
+  const length = wallLength(wall.start, wall.end);
+  const along = point.t * length;
+  return state.openings.find((opening) => {
+    if (opening.type !== "window" || opening.wallIndex !== point.wallIndex) return false;
+    const center = opening.t * length;
+    const insideWidth = along >= center - opening.width / 2 && along <= center + opening.width / 2;
+    const insideHeight =
+      point.y >= opening.sill && point.y <= opening.sill + opening.height;
+    return insideWidth && insideHeight;
+  });
+}
+
 function windowCandidate(hit) {
   if (!state.windowStart || !hit) return null;
   const end = windowPointFromHit(hit);
   if (end.wallIndex !== state.windowStart.wallIndex) return null;
   const wall = end.wall;
   const length = wallLength(wall.start, wall.end);
+
+  if (state.windowStart.extensionOpening) {
+    const opening = state.windowStart.extensionOpening;
+    const originalLeft = opening.t * length - opening.width / 2;
+    const originalRight = opening.t * length + opening.width / 2;
+    const originalBottom = opening.sill;
+    const originalTop = opening.sill + opening.height;
+    const startAlong = state.windowStart.t * length;
+    const endAlong = end.t * length;
+    const horizontalMovement = endAlong - startAlong;
+    const verticalMovement = end.y - state.windowStart.y;
+    let left = originalLeft;
+    let right = originalRight;
+    let bottom = originalBottom;
+    let top = originalTop;
+    let direction;
+
+    if (Math.abs(horizontalMovement) >= Math.abs(verticalMovement)) {
+      if (horizontalMovement >= 0) {
+        right = Math.max(originalRight, endAlong);
+        direction = "RIGHT";
+      } else {
+        left = Math.min(originalLeft, endAlong);
+        direction = "LEFT";
+      }
+    } else if (verticalMovement >= 0) {
+      top = Math.max(originalTop, end.y);
+      direction = "UP";
+    } else {
+      bottom = Math.min(originalBottom, end.y);
+      direction = "DOWN";
+    }
+
+    const extended =
+      left < originalLeft - 0.01 ||
+      right > originalRight + 0.01 ||
+      bottom < originalBottom - 0.01 ||
+      top > originalTop + 0.01;
+    const dimensions = { width: right - left, height: top - bottom, sill: bottom };
+    const centerT = (left + right) / 2 / length;
+    const mergeResult = mergedWindow(end.wallIndex, centerT, dimensions);
+    const placement = openingPlacement(
+      wall,
+      end.wallIndex,
+      "window",
+      mergeResult.t,
+      mergeResult.dimensions,
+      mergeResult.merged,
+    );
+    return {
+      type: "window",
+      wallIndex: end.wallIndex,
+      t: mergeResult.t,
+      dimensions: mergeResult.dimensions,
+      valid: extended && placement.valid,
+      merged: mergeResult.merged,
+      extension: true,
+      direction,
+      extended,
+    };
+  }
+
   const width = Math.abs(end.t - state.windowStart.t) * length;
   const height = Math.abs(end.y - state.windowStart.y);
   const dimensions = {
@@ -495,12 +571,22 @@ function showOpeningPreview(candidate) {
     Math.max(candidate.dimensions.height, 0.04),
     0.018,
   );
-  openingPreview.material.color.setHex(candidate.valid ? 0x62c98d : 0xd4574f);
+  openingPreview.material.color.setHex(
+    candidate.extensionHover ? 0x4ba8d1 : candidate.valid ? 0x62c98d : 0xd4574f,
+  );
   state.previewOpening = candidate;
   const measurement = document.querySelector("#measurement");
   const size =
     `${formatDistance(candidate.dimensions.width, state.units)} × ${formatDistance(candidate.dimensions.height, state.units)}`;
-  measurement.textContent = candidate.merged?.length ? `EXTEND TO ${size}` : size;
+  measurement.textContent = candidate.extensionHover
+    ? "CLICK WINDOW TO EXTEND"
+    : candidate.extension
+      ? candidate.extended
+        ? `EXTEND ${candidate.direction} TO ${size}`
+        : "MOVE PAST A WINDOW EDGE"
+      : candidate.merged?.length
+        ? `EXTEND TO ${size}`
+        : size;
   measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
 }
 
@@ -556,16 +642,31 @@ function updatePreview() {
       return;
     }
     const start = windowPointFromHit(hit);
+    const existingWindow = windowAtPoint(start);
+    if (existingWindow) start.extensionOpening = existingWindow;
     state.previewWindowStart = start;
-    const marker = {
-      type: "window",
-      wallIndex: start.wallIndex,
-      t: start.t,
-      dimensions: { width: 0.12, height: 0.12, sill: Math.max(0, start.y - 0.06) },
-      valid: true,
-    };
+    const marker = existingWindow
+      ? {
+          type: "window",
+          wallIndex: start.wallIndex,
+          t: existingWindow.t,
+          dimensions: {
+            width: existingWindow.width,
+            height: existingWindow.height,
+            sill: existingWindow.sill,
+          },
+          valid: true,
+          extensionHover: true,
+        }
+      : {
+          type: "window",
+          wallIndex: start.wallIndex,
+          t: start.t,
+          dimensions: { width: 0.12, height: 0.12, sill: Math.max(0, start.y - 0.06) },
+          valid: true,
+        };
     showOpeningPreview(marker);
-    document.querySelector("#measurement").textContent = "CLICK FIRST CORNER";
+    if (!existingWindow) document.querySelector("#measurement").textContent = "CLICK FIRST CORNER";
     state.previewOpening = null;
     return;
   }
@@ -634,14 +735,22 @@ function buildAction() {
       state.windowStart = { ...state.previewWindowStart };
       showWindowAnchor(state.windowStart);
       document.querySelector("#tool-help").textContent =
-        "WINDOW · CLICK OPPOSITE CORNER · RIGHT CLICK CANCEL";
+        state.windowStart.extensionOpening
+          ? "WINDOW · MOVE PAST AN EDGE · CLICK TO EXTEND"
+          : "WINDOW · CLICK OPPOSITE CORNER · RIGHT CLICK CANCEL";
       return;
     }
     const hit = wallHit();
     const candidate = windowCandidate(hit);
     if (!candidate) return toast("Finish on the same wall");
-    if (!candidate.valid) return toast("Window must be at least 1' × 1' and fit on the wall");
-    const isExtending = candidate.merged.length > 0;
+    if (!candidate.valid) {
+      return toast(
+        candidate.extension
+          ? "Move past the window edge to extend it"
+          : "Window must be at least 1' × 1' and fit on the wall",
+      );
+    }
+    const isExtending = candidate.extension || candidate.merged.length > 0;
     createOpening("window", candidate.wallIndex, candidate.t, true, candidate.dimensions);
     state.windowStart = null;
     openingPreview.visible = false;
