@@ -6,7 +6,8 @@ A first-person 3D room builder for planning real-world floor plans at human scal
 
 - First-person mouse look and WASD movement
 - Real-world scale: one world unit equals one meter
-- Imperial and metric measurement display
+- Unit-aware grids: one-foot imperial squares or one-meter metric squares, with stronger five-unit lines
+- Contextual wall dimensions showing total wall length, opening sizes, and every gap between wall edges, doors, and windows
 - Click-two-points wall construction with optional six-inch snapping
 - Adjustable wall height and thickness
 - Doors and two-corner windows with exact anchored previews; click an existing window and move left, right, up, or down to extend that edge
