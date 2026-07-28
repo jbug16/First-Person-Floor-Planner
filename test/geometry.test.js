@@ -14,6 +14,11 @@ describe("real-scale geometry", () => {
     expect(snapValue(1.2)).toBeCloseTo(1.2192);
   });
 
+  it("supports unit-specific snapping increments", () => {
+    expect(snapValue(1.24, true, 0.1)).toBeCloseTo(1.2);
+    expect(snapValue(1.26, true, 0.1)).toBeCloseTo(1.3);
+  });
+
   it("measures wall length in meters", () => {
     expect(wallLength({ x: 0, z: 0 }, { x: 3, z: 4 })).toBe(5);
   });
