@@ -61,6 +61,7 @@ const state = {
   undo: [],
   redo: [],
   previewOpening: null,
+  previewWindowStart: null,
 };
 
 const wallMaterial = new THREE.MeshStandardMaterial({ color: 0xf3f0e8, roughness: 0.72 });
@@ -93,6 +94,18 @@ const openingPreview = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), openingPre
 openingPreview.renderOrder = 20;
 openingPreview.visible = false;
 scene.add(openingPreview);
+const windowAnchor = new THREE.Mesh(
+  new THREE.BoxGeometry(0.14, 0.14, 0.025),
+  new THREE.MeshBasicMaterial({
+    color: 0xf2b45f,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: false,
+  }),
+);
+windowAnchor.renderOrder = 21;
+windowAnchor.visible = false;
+scene.add(windowAnchor);
 
 function snapshot() {
   return JSON.stringify({
@@ -143,6 +156,19 @@ function createWall(start, end, height, thickness, saveHistory = true) {
   mesh.rotation.y = -Math.atan2(end.z - start.z, end.x - start.x);
   const wall = { start: { ...start }, end: { ...end }, height, thickness, mesh };
   mesh.userData = { kind: "wall", ref: wall };
+  const hitbox = new THREE.Mesh(
+    new THREE.PlaneGeometry(length, height),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      colorWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  hitbox.userData = { kind: "wall-hitbox", ref: wall };
+  wall.hitbox = hitbox;
+  mesh.add(hitbox);
   scene.add(mesh);
   state.walls.push(wall);
   colliders.push(mesh);
@@ -164,8 +190,12 @@ function addWallSegment(wall, width, height, centerX, centerY) {
 }
 
 function rebuildWallMesh(wall) {
-  wall.mesh.children.forEach((child) => child.geometry?.dispose());
-  wall.mesh.clear();
+  wall.mesh.children
+    .filter((child) => child !== wall.hitbox)
+    .forEach((child) => {
+      child.geometry?.dispose();
+      wall.mesh.remove(child);
+    });
 
   const length = wallLength(wall.start, wall.end);
   const wallIndex = state.walls.indexOf(wall);
@@ -380,7 +410,7 @@ function groundPoint() {
 
 function wallHit() {
   raycaster.setFromCamera(pointer, camera);
-  return raycaster.intersectObjects(state.walls.map((wall) => wall.mesh), true)[0];
+  return raycaster.intersectObjects(state.walls.map((wall) => wall.hitbox), false)[0];
 }
 
 function windowPointFromHit(hit) {
@@ -468,17 +498,52 @@ function showOpeningPreview(candidate) {
   openingPreview.material.color.setHex(candidate.valid ? 0x62c98d : 0xd4574f);
   state.previewOpening = candidate;
   const measurement = document.querySelector("#measurement");
-  measurement.textContent =
+  const size =
     `${formatDistance(candidate.dimensions.width, state.units)} × ${formatDistance(candidate.dimensions.height, state.units)}`;
+  measurement.textContent = candidate.merged?.length ? `EXTEND TO ${size}` : size;
   measurement.classList.toggle("hidden", !document.querySelector("#dimensions").checked);
+}
+
+function showWindowAnchor(start) {
+  const wall = state.walls[start.wallIndex];
+  const length = wallLength(wall.start, wall.end);
+  const point = {
+    x: wall.start.x + (wall.end.x - wall.start.x) * start.t,
+    z: wall.start.z + (wall.end.z - wall.start.z) * start.t,
+  };
+  const normal = new THREE.Vector3(
+    -(wall.end.z - wall.start.z) / length,
+    0,
+    (wall.end.x - wall.start.x) / length,
+  );
+  const towardCamera = new THREE.Vector3(
+    camera.position.x - point.x,
+    0,
+    camera.position.z - point.z,
+  );
+  if (normal.dot(towardCamera) < 0) normal.negate();
+  const offset = wall.thickness / 2 + 0.025;
+  windowAnchor.position.set(
+    point.x + normal.x * offset,
+    start.y,
+    point.z + normal.z * offset,
+  );
+  windowAnchor.rotation.y = -Math.atan2(
+    wall.end.z - wall.start.z,
+    wall.end.x - wall.start.x,
+  );
+  windowAnchor.visible = true;
 }
 
 function updatePreview() {
   preview.visible = false;
   openingPreview.visible = false;
+  windowAnchor.visible = false;
   state.previewOpening = null;
+  state.previewWindowStart = null;
 
   if (state.tool === "window") {
+    if (state.windowStart) showWindowAnchor(state.windowStart);
     const hit = wallHit();
     if (!hit) {
       document.querySelector("#measurement").classList.add("hidden");
@@ -491,6 +556,7 @@ function updatePreview() {
       return;
     }
     const start = windowPointFromHit(hit);
+    state.previewWindowStart = start;
     const marker = {
       type: "window",
       wallIndex: start.wallIndex,
@@ -563,14 +629,15 @@ function buildAction() {
       document.querySelector("#tool-help").textContent = "WALL · CLICK START POINT";
     }
   } else if (state.tool === "window") {
-    const hit = wallHit();
     if (!state.windowStart) {
-      if (!hit) return toast("Aim at a wall to start the window");
-      state.windowStart = windowPointFromHit(hit);
+      if (!state.previewWindowStart) return toast("Aim at a wall to start the window");
+      state.windowStart = { ...state.previewWindowStart };
+      showWindowAnchor(state.windowStart);
       document.querySelector("#tool-help").textContent =
         "WINDOW · CLICK OPPOSITE CORNER · RIGHT CLICK CANCEL";
       return;
     }
+    const hit = wallHit();
     const candidate = windowCandidate(hit);
     if (!candidate) return toast("Finish on the same wall");
     if (!candidate.valid) return toast("Window must be at least 1' × 1' and fit on the wall");
@@ -578,6 +645,7 @@ function buildAction() {
     createOpening("window", candidate.wallIndex, candidate.t, true, candidate.dimensions);
     state.windowStart = null;
     openingPreview.visible = false;
+    windowAnchor.visible = false;
     document.querySelector("#measurement").classList.add("hidden");
     document.querySelector("#tool-help").textContent = "WINDOW · CLICK FIRST CORNER";
     toast(isExtending ? "Window extended" : "Window placed");
@@ -604,13 +672,13 @@ function selectAtCrosshair() {
   const hit = raycaster.intersectObjects(objects, true)[0];
   state.walls.forEach((wall) =>
     wall.mesh.traverse((child) => {
-      if (child.isMesh) child.material = wallMaterial.clone();
+      if (child.isMesh && child !== wall.hitbox) child.material = wallMaterial.clone();
     }),
   );
   state.selected = hit?.object.userData.ref || null;
   if (state.selected?.start) {
     state.selected.mesh.traverse((child) => {
-      if (child.isMesh) child.material = selectedMaterial;
+      if (child.isMesh && child !== state.selected.hitbox) child.material = selectedMaterial;
     });
   }
   toast(state.selected ? `${state.selected.type || "Wall"} selected · Delete to remove` : "Nothing selected");
@@ -652,7 +720,9 @@ function setTool(tool) {
   state.windowStart = null;
   preview.visible = false;
   openingPreview.visible = false;
+  windowAnchor.visible = false;
   state.previewOpening = null;
+  state.previewWindowStart = null;
   document.querySelector("#wall-controls").classList.toggle("hidden", tool !== "wall");
   document.querySelectorAll(".tool").forEach((button) => {
     button.classList.toggle("active", button.dataset.tool === tool);
@@ -838,6 +908,7 @@ addEventListener("mousedown", (event) => {
     state.windowStart = null;
     preview.visible = false;
     openingPreview.visible = false;
+    windowAnchor.visible = false;
     document.querySelector("#measurement").classList.add("hidden");
     setTool(state.tool);
   }
