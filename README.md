@@ -31,6 +31,14 @@ Open the local address shown by Vite, click **Enter project**, and use:
 - For windows, click two opposite corners directly on the wall
 - Right click to cancel a wall
 - `1–4` to switch tools
+- `Z` / `Y` to undo and redo
+- `G` to toggle grid snapping
+- `U` to switch imperial/metric units
+- `V` to show or hide dimensions
+- `[` / `]` to decrease or increase wall height
+- `Shift` + `[` / `]` to adjust wall thickness
+- `C` to cancel the current placement
+- `Ctrl/Cmd` + `S`, `O`, or `E` to save, load, or export
 - `Delete` to remove a selected item
 - `Esc` to release the mouse
 
