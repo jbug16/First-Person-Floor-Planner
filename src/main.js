@@ -1236,7 +1236,10 @@ controls.addEventListener("unlock", () => {
 });
 
 addEventListener("keydown", (event) => {
-  if (!document.querySelector("#plan-2d").classList.contains("hidden")) return;
+  if (!document.querySelector("#plan-2d").classList.contains("hidden")) {
+    handlePlanShortcut(event);
+    return;
+  }
   keys[event.code] = true;
   const isTyping =
     event.target instanceof HTMLInputElement &&
@@ -1340,11 +1343,39 @@ const plan2d = {
   openings: [],
   dragStart: null,
   dragEnd: null,
+  selected: null,
+  undo: [],
+  redo: [],
 };
 let projectStarted = false;
 
+function planSnapshot() {
+  return JSON.stringify({ walls: plan2d.walls, openings: plan2d.openings });
+}
+
+function recordPlanHistory() {
+  plan2d.undo.push(planSnapshot());
+  if (plan2d.undo.length > 60) plan2d.undo.shift();
+  plan2d.redo.length = 0;
+}
+
+function restorePlan(serialized) {
+  const data = JSON.parse(serialized);
+  plan2d.walls = data.walls;
+  plan2d.openings = data.openings;
+  plan2d.selected = null;
+  syncPlanSelection();
+  renderPlan2d();
+}
+
 function planValue(id) {
   return toMeters(document.querySelector(`#${id}`).value, plan2d.unit);
+}
+
+function planDistanceLabel(meters) {
+  const value = fromMeters(meters, plan2d.unit);
+  const digits = ["in", "cm"].includes(plan2d.unit) ? 1 : 2;
+  return `${Number(value.toFixed(digits))} ${plan2d.unit}`;
 }
 
 function svgPoint(event) {
@@ -1380,7 +1411,10 @@ function renderPlan2d() {
       x2: wall.end.x,
       y2: wall.end.y,
       "stroke-width": Math.max(wall.thickness, 0.055),
-      class: "plan-wall",
+      class:
+        plan2d.selected?.kind === "wall" && plan2d.selected.index === wallIndex
+          ? "plan-wall selected"
+          : "plan-wall",
     });
     shapes.append(line);
     const hit = planElement("line", {
@@ -1395,10 +1429,7 @@ function renderPlan2d() {
     const middleX = (wall.start.x + wall.end.x) / 2;
     const middleY = (wall.start.y + wall.end.y) / 2 - 0.18;
     const label = planElement("text", { x: middleX, y: middleY, class: "plan-dimension" });
-    label.textContent = formatDistance(
-      pointDistance(wall.start, wall.end),
-      ["m", "cm"].includes(plan2d.unit) ? "metric" : "imperial",
-    );
+    label.textContent = planDistanceLabel(pointDistance(wall.start, wall.end));
     shapes.append(label);
   });
 
@@ -1417,7 +1448,10 @@ function renderPlan2d() {
       x2: centerX + dx * half,
       y2: centerY + dy * half,
       "stroke-width": Math.max(wall.thickness + 0.04, 0.1),
-      class: "plan-opening",
+      class:
+        plan2d.selected?.kind === "opening" && plan2d.selected.index === openingIndex
+          ? "plan-opening selected"
+          : "plan-opening",
       "data-opening-index": openingIndex,
     });
     shapes.append(line);
@@ -1433,15 +1467,79 @@ function renderPlan2d() {
         class: "plan-draft",
       }),
     );
+    const draftLength = pointDistance(plan2d.dragStart, plan2d.dragEnd);
+    const draftLabel = planElement("text", {
+      x: (plan2d.dragStart.x + plan2d.dragEnd.x) / 2,
+      y: (plan2d.dragStart.y + plan2d.dragEnd.y) / 2 - 0.2,
+      class: "plan-dimension",
+    });
+    draftLabel.textContent = planDistanceLabel(draftLength);
+    draft.append(draftLabel);
   }
   document.querySelector("#plan-count").textContent =
     `${plan2d.walls.length} walls · ${plan2d.openings.length} openings`;
+}
+
+function syncPlanSelection() {
+  const selectedFields = document.querySelector("#selection-fields");
+  selectedFields.classList.toggle("hidden", !plan2d.selected);
+  if (!plan2d.selected) return;
+  const unit = plan2d.unit;
+  if (plan2d.selected.kind === "wall") {
+    const wall = plan2d.walls[plan2d.selected.index];
+    if (!wall) {
+      plan2d.selected = null;
+      return syncPlanSelection();
+    }
+    document.querySelector("#selection-name").textContent = "Wall";
+    document.querySelector("#wall-fields").classList.remove("hidden");
+    document.querySelector("#room-fields").classList.add("hidden");
+    document.querySelector("#opening-fields").classList.add("hidden");
+    document.querySelector("#plan-length").value = Number(
+      fromMeters(pointDistance(wall.start, wall.end), unit).toFixed(3),
+    );
+    document.querySelector("#plan-wall-height").value = Number(
+      fromMeters(wall.height, unit).toFixed(3),
+    );
+    document.querySelector("#plan-wall-thickness").value = Number(
+      fromMeters(wall.thickness, unit).toFixed(3),
+    );
+  } else {
+    const opening = plan2d.openings[plan2d.selected.index];
+    if (!opening) {
+      plan2d.selected = null;
+      return syncPlanSelection();
+    }
+    document.querySelector("#selection-name").textContent =
+      opening.type === "door" ? "Door" : "Window";
+    document.querySelector("#wall-fields").classList.add("hidden");
+    document.querySelector("#room-fields").classList.add("hidden");
+    document.querySelector("#opening-fields").classList.remove("hidden");
+    document.querySelector("#sill-field").classList.toggle("hidden", opening.type !== "window");
+    document.querySelector("#opening-width").value = Number(fromMeters(opening.width, unit).toFixed(3));
+    document.querySelector("#opening-height").value = Number(fromMeters(opening.height, unit).toFixed(3));
+    document.querySelector("#opening-sill").value = Number(fromMeters(opening.sill, unit).toFixed(3));
+  }
+}
+
+function selectPlanObject(kind, index) {
+  plan2d.selected = { kind, index };
+  syncPlanSelection();
+  renderPlan2d();
+}
+
+function clearPlanSelection() {
+  plan2d.selected = null;
+  syncPlanSelection();
+  setPlanTool(plan2d.tool);
 }
 
 function setPlanTool(tool) {
   plan2d.tool = tool;
   plan2d.dragStart = null;
   plan2d.dragEnd = null;
+  plan2d.selected = null;
+  syncPlanSelection();
   document.querySelectorAll(".plan-tool").forEach((button) =>
     button.classList.toggle("active", button.dataset.planTool === tool),
   );
@@ -1493,6 +1591,16 @@ function removePlanWall(wallIndex) {
     }));
 }
 
+function deletePlanSelection() {
+  if (!plan2d.selected) return;
+  recordPlanHistory();
+  if (plan2d.selected.kind === "wall") removePlanWall(plan2d.selected.index);
+  else plan2d.openings.splice(plan2d.selected.index, 1);
+  plan2d.selected = null;
+  syncPlanSelection();
+  renderPlan2d();
+}
+
 function addPlanOpening(point) {
   const target = wallAtPlanPoint(point);
   if (!target) return toast("Click closer to a wall");
@@ -1509,6 +1617,7 @@ function addPlanOpening(point) {
       Math.abs(opening.t - t) * wallLengthMeters < (opening.width + width) / 2,
   );
   if (overlaps) return toast("That opening overlaps another opening");
+  recordPlanHistory();
   plan2d.openings.push({
     type: plan2d.tool,
     wallIndex: target.wallIndex,
@@ -1523,7 +1632,17 @@ function addPlanOpening(point) {
 const planCanvas = document.querySelector("#plan-canvas");
 planCanvas.addEventListener("pointerdown", (event) => {
   const point = svgPoint(event);
+  const openingIndex = Number(event.target.dataset.openingIndex);
+  const wallIndex = Number(event.target.dataset.wallIndex);
+  if (Number.isInteger(openingIndex) && plan2d.tool !== "delete") {
+    selectPlanObject("opening", openingIndex);
+    return;
+  }
   if (plan2d.tool === "wall") {
+    if (Number.isInteger(wallIndex)) {
+      selectPlanObject("wall", wallIndex);
+      return;
+    }
     plan2d.dragStart = point;
     plan2d.dragEnd = point;
     planCanvas.setPointerCapture(event.pointerId);
@@ -1534,6 +1653,7 @@ planCanvas.addEventListener("pointerdown", (event) => {
     const width = planValue("room-width");
     const depth = planValue("room-depth");
     if (width <= 0 || depth <= 0) return toast("Enter a valid room width and depth");
+    recordPlanHistory();
     plan2d.walls.push(
       ...roomWalls(
         point,
@@ -1548,7 +1668,7 @@ planCanvas.addEventListener("pointerdown", (event) => {
   }
   if (["door", "window"].includes(plan2d.tool)) return addPlanOpening(point);
   if (plan2d.tool === "delete") {
-    const openingIndex = Number(event.target.dataset.openingIndex);
+    recordPlanHistory();
     if (Number.isInteger(openingIndex)) {
       plan2d.openings.splice(openingIndex, 1);
     } else {
@@ -1567,6 +1687,7 @@ planCanvas.addEventListener("pointermove", (event) => {
 planCanvas.addEventListener("pointerup", () => {
   if (!plan2d.dragStart || !plan2d.dragEnd) return;
   if (pointDistance(plan2d.dragStart, plan2d.dragEnd) >= 0.15) {
+    recordPlanHistory();
     plan2d.walls.push({
       start: plan2d.dragStart,
       end: plan2d.dragEnd,
@@ -1582,6 +1703,52 @@ planCanvas.addEventListener("pointerup", () => {
 document.querySelectorAll(".plan-tool").forEach((button) =>
   button.addEventListener("click", () => setPlanTool(button.dataset.planTool)),
 );
+document.querySelector("#clear-selection").addEventListener("click", clearPlanSelection);
+
+function applySelectedMeasurements() {
+  if (!plan2d.selected) return;
+  recordPlanHistory();
+  if (plan2d.selected.kind === "wall") {
+    const wall = plan2d.walls[plan2d.selected.index];
+    const currentLength = pointDistance(wall.start, wall.end);
+    const nextLength = planValue("plan-length");
+    if (nextLength > 0 && currentLength > 0) {
+      wall.end = {
+        x: wall.start.x + ((wall.end.x - wall.start.x) / currentLength) * nextLength,
+        y: wall.start.y + ((wall.end.y - wall.start.y) / currentLength) * nextLength,
+      };
+    }
+    wall.height = planValue("plan-wall-height");
+    wall.thickness = planValue("plan-wall-thickness");
+    const wallLengthMeters = pointDistance(wall.start, wall.end);
+    plan2d.openings
+      .filter((opening) => opening.wallIndex === plan2d.selected.index)
+      .forEach((opening) => {
+        opening.width = Math.min(opening.width, wallLengthMeters);
+        const halfT = opening.width / 2 / wallLengthMeters;
+        opening.t = THREE.MathUtils.clamp(opening.t, halfT, 1 - halfT);
+      });
+  } else {
+    const opening = plan2d.openings[plan2d.selected.index];
+    const wall = plan2d.walls[opening.wallIndex];
+    const maximumWidth = pointDistance(wall.start, wall.end);
+    opening.width = Math.min(planValue("opening-width"), maximumWidth);
+    opening.height = planValue("opening-height");
+    opening.sill = opening.type === "window" ? planValue("opening-sill") : 0;
+    const halfT = opening.width / 2 / maximumWidth;
+    opening.t = THREE.MathUtils.clamp(opening.t, halfT, 1 - halfT);
+  }
+  renderPlan2d();
+}
+
+[
+  "plan-length",
+  "plan-wall-height",
+  "plan-wall-thickness",
+  "opening-width",
+  "opening-height",
+  "opening-sill",
+].forEach((id) => document.querySelector(`#${id}`).addEventListener("change", applySelectedMeasurements));
 document.querySelector("#plan-unit").addEventListener("change", (event) => {
   const previous = plan2d.unit;
   const next = event.target.value;
@@ -1600,7 +1767,51 @@ document.querySelector("#plan-unit").addEventListener("change", (event) => {
     input.value = Number(fromMeters(toMeters(input.value, previous), next).toFixed(3));
   });
   plan2d.unit = next;
+  syncPlanSelection();
+  renderPlan2d();
 });
+
+function handlePlanShortcut(event) {
+  if (
+    event.target instanceof HTMLInputElement ||
+    event.target instanceof HTMLSelectElement
+  ) return;
+  const command = event.ctrlKey || event.metaKey;
+  if (command && ["KeyZ", "KeyY"].includes(event.code)) event.preventDefault();
+  if ((command && event.code === "KeyZ") || (!command && event.code === "KeyZ")) {
+    if (!plan2d.undo.length) return;
+    plan2d.redo.push(planSnapshot());
+    restorePlan(plan2d.undo.pop());
+    return;
+  }
+  if ((command && event.code === "KeyY") || (!command && event.code === "KeyY")) {
+    if (!plan2d.redo.length) return;
+    plan2d.undo.push(planSnapshot());
+    restorePlan(plan2d.redo.pop());
+    return;
+  }
+  if (event.code === "Digit1") setPlanTool("wall");
+  if (event.code === "Digit2") setPlanTool("door");
+  if (event.code === "Digit3") setPlanTool("window");
+  if (event.code === "Digit4") setPlanTool("delete");
+  if (event.code === "KeyR") setPlanTool("room");
+  if (event.code === "Delete" || event.code === "Backspace") deletePlanSelection();
+  if (event.code === "KeyG") {
+    const snap = document.querySelector("#plan-snap");
+    snap.checked = !snap.checked;
+    toast(`2D snapping ${snap.checked ? "on" : "off"}`);
+  }
+  if (event.code === "KeyU") {
+    const unit = document.querySelector("#plan-unit");
+    unit.value = ["ft", "in"].includes(plan2d.unit) ? "m" : "ft";
+    unit.dispatchEvent(new Event("change"));
+  }
+  if (event.code === "Escape") {
+    plan2d.dragStart = null;
+    plan2d.dragEnd = null;
+    clearPlanSelection();
+  }
+}
 
 function startBlank3d() {
   clearObjects();
