@@ -7,6 +7,14 @@ import {
   wallLength,
   wallSegmentsConflict,
 } from "./geometry.js";
+import {
+  exactEndpoint,
+  fromMeters,
+  nearestPointOnPlanWall,
+  pointDistance,
+  roomWalls,
+  toMeters,
+} from "./plan2d.js";
 import "./style.css";
 
 const canvas = document.querySelector("#world");
@@ -1146,7 +1154,6 @@ function exportProject() {
 document.querySelectorAll(".tool").forEach((button) =>
   button.addEventListener("click", () => setTool(button.dataset.tool)),
 );
-document.querySelector("#enter-world").addEventListener("click", () => controls.lock());
 document.querySelector("#save").addEventListener("click", saveProject);
 document.querySelector("#load").addEventListener("click", loadProject);
 document.querySelector("#export").addEventListener("click", exportProject);
@@ -1221,10 +1228,15 @@ document.querySelector("#redo").addEventListener("click", () => {
 
 controls.addEventListener("lock", () => document.querySelector("#start-card").classList.add("hidden"));
 controls.addEventListener("unlock", () => {
+  if (projectStarted) {
+    document.querySelector("#open-2d").classList.add("hidden");
+    document.querySelector("#enter-world").textContent = "Resume project";
+  }
   document.querySelector("#start-card").classList.remove("hidden");
 });
 
 addEventListener("keydown", (event) => {
+  if (!document.querySelector("#plan-2d").classList.contains("hidden")) return;
   keys[event.code] = true;
   const isTyping =
     event.target instanceof HTMLInputElement &&
@@ -1320,125 +1332,332 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-const INCH = 0.0254;
-const PLAN_X = -140;
-const PLAN_Y = 180;
-const apartmentPoint = (x, y) => ({
-  x: (x + PLAN_X) * INCH,
-  z: (y - PLAN_Y) * INCH,
-});
+const svgNamespace = "http://www.w3.org/2000/svg";
+const plan2d = {
+  tool: "wall",
+  unit: "ft",
+  walls: [],
+  openings: [],
+  dragStart: null,
+  dragEnd: null,
+};
+let projectStarted = false;
 
-function buildApartmentPlan() {
-  const height = 108 * INCH;
-  const thickness = 6 * INCH;
-  const addWall = (x1, y1, x2, y2) => {
-    const wall = createWall(
-      apartmentPoint(x1, y1),
-      apartmentPoint(x2, y2),
-      height,
-      thickness,
-      false,
-    );
-    return state.walls.indexOf(wall);
-  };
-  const addOpening = (type, wallIndex, offset, width, openingHeight, sill = 0) => {
-    const wall = state.walls[wallIndex];
-    const lengthInches = wallLength(wall.start, wall.end) / INCH;
-    createOpening(
-      type,
-      wallIndex,
-      (offset + width / 2) / lengthInches,
-      false,
-      {
-        width: width * INCH,
-        height: openingHeight * INCH,
-        sill: sill * INCH,
-      },
-      false,
-    );
-  };
-  const addFixture = (type, label, x, y, width, depth, fixtureHeight, rotation = 0) =>
-    createFixture(
-      {
-        type,
-        label,
-        x: apartmentPoint(x, y).x,
-        z: apartmentPoint(x, y).z,
-        width: width * INCH,
-        depth: depth * INCH,
-        height: fixtureHeight * INCH,
-        rotation,
-        locked: true,
-      },
-      false,
-    );
-  const addFixtureBounds = (type, label, left, top, right, bottom, fixtureHeight) =>
-    addFixture(
-      type,
-      label,
-      (left + right) / 2,
-      (top + bottom) / 2,
-      right - left,
-      bottom - top,
-      fixtureHeight,
-    );
-
-  // Exterior shell and balcony-facing living wall.
-  const livingTop = addWall(0, 0, 145.5, 0);
-  addOpening("window", livingTop, 21.5, 73.25, 48, 36);
-  addOpening("door", livingTop, 101.25, 34.75, 84);
-  addWall(0, 0, 0, 313.25);
-  addWall(0, 313.25, 126.5, 313.25);
-  addWall(126.5, 313.25, 126.5, 346.25);
-  addWall(126.5, 346.25, 145.5, 346.25);
-  const entryWall = addWall(145.5, 346.25, 206.5, 346.25);
-  addOpening("door", entryWall, 7, 36, 84);
-  addWall(206.5, 346.25, 279.5, 346.25);
-  addWall(279.5, -11.25, 279.5, 346.25);
-
-  // Bedroom, hall, bathroom, laundry, and closet partitions.
-  addWall(145.5, -11.25, 145.5, 142.5);
-  addWall(145.5, -11.25, 279.5, -11.25);
-  const bedroomTop = state.walls.length - 1;
-  addOpening("window", bedroomTop, 30, 74.5, 48, 36);
-  const bedroomBottom = addWall(145.5, 142.5, 279.5, 142.5);
-  addOpening("door", bedroomBottom, 11.25, 30.75, 84);
-  addOpening("door", bedroomBottom, 83, 30, 84);
-  const hallSide = addWall(196.25, 142.5, 196.25, 184.5);
-  addOpening("door", hallSide, 6, 30, 84);
-  addWall(158.5, 184.5, 196.25, 184.5);
-  const bathLeft = addWall(158.5, 184.5, 158.5, 256.5);
-  addOpening("door", bathLeft, 30, 30, 84);
-  const bathBottom = addWall(158.5, 256.5, 279.5, 256.5);
-  addOpening("door", bathBottom, 48, 34, 84);
-  addWall(158.5, 256.5, 158.5, 346.25);
-  addWall(206.5, 256.5, 206.5, 346.25);
-  addWall(158.5, 291.5, 206.5, 291.5);
-  addWall(0, 184.5, 27, 184.5);
-
-  // Apartment-owned kitchen: L counter, island, sink, range, and refrigerator.
-  addFixtureBounds("counter", "Kitchen counter", 3, 187.5, 25, 288.25, 36);
-  addFixtureBounds("counter", "Kitchen counter", 3, 288.25, 96.5, 310.25, 36);
-  addFixtureBounds("island", "Kitchen island", 55, 202, 97, 278.5, 36);
-  addFixtureBounds("appliance", "Refrigerator", 98.5, 276.25, 124.5, 311.25, 72);
-
-  // Bathroom fixtures.
-  addFixtureBounds("tub", "Bathtub", 161.5, 193.5, 191.5, 253.5, 20);
-  addFixtureBounds("vanity", "Bathroom vanity", 253.5, 149.5, 276.5, 208.5, 34);
-  addFixtureBounds("toilet", "Toilet", 244, 220, 269, 250, 28);
-
-  // Laundry appliances and permanent closet storage.
-  addFixtureBounds("washer", "Washer", 167.5, 259, 197.5, 289, 38);
-  addFixtureBounds("dryer", "Dryer", 167.5, 294, 197.5, 324, 38);
-  addFixtureBounds("shelf", "Closet shelf", 258.5, 260, 276.5, 327, 18);
-  addFixtureBounds("shelf", "Closet shelf", 214.5, 326.25, 258.5, 344.25, 18);
-
-  document.querySelector("#project-name").value = "Apartment Floor Plan";
-  camera.position.set(apartmentPoint(96, 160).x, 1.7, apartmentPoint(96, 160).z);
-  camera.lookAt(apartmentPoint(96, 70).x, 1.7, apartmentPoint(96, 70).z);
+function planValue(id) {
+  return toMeters(document.querySelector(`#${id}`).value, plan2d.unit);
 }
 
-buildApartmentPlan();
+function svgPoint(event) {
+  const svg = document.querySelector("#plan-canvas");
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const transformed = point.matrixTransform(svg.getScreenCTM().inverse());
+  if (!document.querySelector("#plan-snap").checked) return { x: transformed.x, y: transformed.y };
+  const spacing = ["ft", "in"].includes(plan2d.unit) ? 0.1524 : 0.1;
+  return {
+    x: Math.round(transformed.x / spacing) * spacing,
+    y: Math.round(transformed.y / spacing) * spacing,
+  };
+}
+
+function planElement(name, attributes = {}) {
+  const element = document.createElementNS(svgNamespace, name);
+  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+  return element;
+}
+
+function renderPlan2d() {
+  const shapes = document.querySelector("#plan-shapes");
+  const draft = document.querySelector("#plan-preview");
+  shapes.replaceChildren();
+  draft.replaceChildren();
+
+  plan2d.walls.forEach((wall, wallIndex) => {
+    const line = planElement("line", {
+      x1: wall.start.x,
+      y1: wall.start.y,
+      x2: wall.end.x,
+      y2: wall.end.y,
+      "stroke-width": Math.max(wall.thickness, 0.055),
+      class: "plan-wall",
+    });
+    shapes.append(line);
+    const hit = planElement("line", {
+      x1: wall.start.x,
+      y1: wall.start.y,
+      x2: wall.end.x,
+      y2: wall.end.y,
+      class: "plan-wall-hit",
+      "data-wall-index": wallIndex,
+    });
+    shapes.append(hit);
+    const middleX = (wall.start.x + wall.end.x) / 2;
+    const middleY = (wall.start.y + wall.end.y) / 2 - 0.18;
+    const label = planElement("text", { x: middleX, y: middleY, class: "plan-dimension" });
+    label.textContent = formatDistance(
+      pointDistance(wall.start, wall.end),
+      ["m", "cm"].includes(plan2d.unit) ? "metric" : "imperial",
+    );
+    shapes.append(label);
+  });
+
+  plan2d.openings.forEach((opening, openingIndex) => {
+    const wall = plan2d.walls[opening.wallIndex];
+    if (!wall) return;
+    const length = pointDistance(wall.start, wall.end);
+    const dx = (wall.end.x - wall.start.x) / length;
+    const dy = (wall.end.y - wall.start.y) / length;
+    const centerX = wall.start.x + (wall.end.x - wall.start.x) * opening.t;
+    const centerY = wall.start.y + (wall.end.y - wall.start.y) * opening.t;
+    const half = opening.width / 2;
+    const line = planElement("line", {
+      x1: centerX - dx * half,
+      y1: centerY - dy * half,
+      x2: centerX + dx * half,
+      y2: centerY + dy * half,
+      "stroke-width": Math.max(wall.thickness + 0.04, 0.1),
+      class: "plan-opening",
+      "data-opening-index": openingIndex,
+    });
+    shapes.append(line);
+  });
+
+  if (plan2d.dragStart && plan2d.dragEnd) {
+    draft.append(
+      planElement("line", {
+        x1: plan2d.dragStart.x,
+        y1: plan2d.dragStart.y,
+        x2: plan2d.dragEnd.x,
+        y2: plan2d.dragEnd.y,
+        class: "plan-draft",
+      }),
+    );
+  }
+  document.querySelector("#plan-count").textContent =
+    `${plan2d.walls.length} walls · ${plan2d.openings.length} openings`;
+}
+
+function setPlanTool(tool) {
+  plan2d.tool = tool;
+  plan2d.dragStart = null;
+  plan2d.dragEnd = null;
+  document.querySelectorAll(".plan-tool").forEach((button) =>
+    button.classList.toggle("active", button.dataset.planTool === tool),
+  );
+  document.querySelector("#wall-fields").classList.toggle("hidden", tool !== "wall");
+  document.querySelector("#room-fields").classList.toggle("hidden", tool !== "room");
+  document.querySelector("#opening-fields").classList.toggle(
+    "hidden",
+    !["door", "window"].includes(tool),
+  );
+  document.querySelector("#sill-field").classList.toggle("hidden", tool !== "window");
+  const instructions = {
+    wall: "Drag anywhere on the grid to draw a wall. Add an exact length to override the dragged distance.",
+    room: "Enter the room width and depth, then click where its top-left corner should go.",
+    door: "Enter the door size, then click the wall where it belongs.",
+    window: "Enter the window size and sill height, then click the wall where it belongs.",
+    delete: "Click a door, window, or wall to remove it.",
+  };
+  document.querySelector("#plan-help").textContent = instructions[tool];
+  if (tool === "door") {
+    document.querySelector("#opening-width").value = fromMeters(0.9144, plan2d.unit).toFixed(2);
+    document.querySelector("#opening-height").value = fromMeters(2.032, plan2d.unit).toFixed(2);
+  }
+  if (tool === "window") {
+    document.querySelector("#opening-width").value = fromMeters(1.2192, plan2d.unit).toFixed(2);
+    document.querySelector("#opening-height").value = fromMeters(1.2192, plan2d.unit).toFixed(2);
+    document.querySelector("#opening-sill").value = fromMeters(0.9144, plan2d.unit).toFixed(2);
+  }
+  renderPlan2d();
+}
+
+function wallAtPlanPoint(point, threshold = 0.3) {
+  let best = null;
+  plan2d.walls.forEach((wall, wallIndex) => {
+    const projected = nearestPointOnPlanWall(point, wall);
+    if (projected.distance <= threshold && (!best || projected.distance < best.distance)) {
+      best = { ...projected, wall, wallIndex };
+    }
+  });
+  return best;
+}
+
+function removePlanWall(wallIndex) {
+  plan2d.walls.splice(wallIndex, 1);
+  plan2d.openings = plan2d.openings
+    .filter((opening) => opening.wallIndex !== wallIndex)
+    .map((opening) => ({
+      ...opening,
+      wallIndex: opening.wallIndex > wallIndex ? opening.wallIndex - 1 : opening.wallIndex,
+    }));
+}
+
+function addPlanOpening(point) {
+  const target = wallAtPlanPoint(point);
+  if (!target) return toast("Click closer to a wall");
+  const width = planValue("opening-width");
+  const height = planValue("opening-height");
+  const sill = plan2d.tool === "window" ? planValue("opening-sill") : 0;
+  const wallLengthMeters = pointDistance(target.wall.start, target.wall.end);
+  if (width <= 0 || width > wallLengthMeters) return toast("That opening is wider than the wall");
+  const halfT = width / 2 / wallLengthMeters;
+  const t = THREE.MathUtils.clamp(target.t, halfT, 1 - halfT);
+  const overlaps = plan2d.openings.some(
+    (opening) =>
+      opening.wallIndex === target.wallIndex &&
+      Math.abs(opening.t - t) * wallLengthMeters < (opening.width + width) / 2,
+  );
+  if (overlaps) return toast("That opening overlaps another opening");
+  plan2d.openings.push({
+    type: plan2d.tool,
+    wallIndex: target.wallIndex,
+    t,
+    width,
+    height,
+    sill,
+  });
+  renderPlan2d();
+}
+
+const planCanvas = document.querySelector("#plan-canvas");
+planCanvas.addEventListener("pointerdown", (event) => {
+  const point = svgPoint(event);
+  if (plan2d.tool === "wall") {
+    plan2d.dragStart = point;
+    plan2d.dragEnd = point;
+    planCanvas.setPointerCapture(event.pointerId);
+    renderPlan2d();
+    return;
+  }
+  if (plan2d.tool === "room") {
+    const width = planValue("room-width");
+    const depth = planValue("room-depth");
+    if (width <= 0 || depth <= 0) return toast("Enter a valid room width and depth");
+    plan2d.walls.push(
+      ...roomWalls(
+        point,
+        width,
+        depth,
+        planValue("plan-wall-height"),
+        planValue("plan-wall-thickness"),
+      ),
+    );
+    renderPlan2d();
+    return;
+  }
+  if (["door", "window"].includes(plan2d.tool)) return addPlanOpening(point);
+  if (plan2d.tool === "delete") {
+    const openingIndex = Number(event.target.dataset.openingIndex);
+    if (Number.isInteger(openingIndex)) {
+      plan2d.openings.splice(openingIndex, 1);
+    } else {
+      const target = wallAtPlanPoint(point);
+      if (target) removePlanWall(target.wallIndex);
+    }
+    renderPlan2d();
+  }
+});
+planCanvas.addEventListener("pointermove", (event) => {
+  if (!plan2d.dragStart) return;
+  const pointerEnd = svgPoint(event);
+  plan2d.dragEnd = exactEndpoint(plan2d.dragStart, pointerEnd, planValue("plan-length"));
+  renderPlan2d();
+});
+planCanvas.addEventListener("pointerup", () => {
+  if (!plan2d.dragStart || !plan2d.dragEnd) return;
+  if (pointDistance(plan2d.dragStart, plan2d.dragEnd) >= 0.15) {
+    plan2d.walls.push({
+      start: plan2d.dragStart,
+      end: plan2d.dragEnd,
+      height: planValue("plan-wall-height"),
+      thickness: planValue("plan-wall-thickness"),
+    });
+  }
+  plan2d.dragStart = null;
+  plan2d.dragEnd = null;
+  renderPlan2d();
+});
+
+document.querySelectorAll(".plan-tool").forEach((button) =>
+  button.addEventListener("click", () => setPlanTool(button.dataset.planTool)),
+);
+document.querySelector("#plan-unit").addEventListener("change", (event) => {
+  const previous = plan2d.unit;
+  const next = event.target.value;
+  [
+    "plan-length",
+    "room-width",
+    "room-depth",
+    "opening-width",
+    "opening-height",
+    "opening-sill",
+    "plan-wall-height",
+    "plan-wall-thickness",
+  ].forEach((id) => {
+    const input = document.querySelector(`#${id}`);
+    if (input.value === "") return;
+    input.value = Number(fromMeters(toMeters(input.value, previous), next).toFixed(3));
+  });
+  plan2d.unit = next;
+});
+
+function startBlank3d() {
+  clearObjects();
+  state.undo.length = 0;
+  state.redo.length = 0;
+  camera.position.set(0, 1.7, 7);
+  camera.lookAt(0, 1.7, 0);
+  document.querySelector("#project-name").value = "Untitled Floor Plan";
+  document.querySelector("#start-card").classList.add("hidden");
+  projectStarted = true;
+  controls.lock();
+}
+
+document.querySelector("#open-2d").addEventListener("click", () => {
+  document.querySelector("#start-card").classList.add("hidden");
+  document.querySelector("#plan-2d").classList.remove("hidden");
+  renderPlan2d();
+});
+document.querySelector("#cancel-2d").addEventListener("click", () => {
+  document.querySelector("#plan-2d").classList.add("hidden");
+  document.querySelector("#start-card").classList.remove("hidden");
+});
+document.querySelector("#finish-2d").addEventListener("click", () => {
+  clearObjects();
+  plan2d.walls.forEach((wall) =>
+    createWall(
+      { x: wall.start.x, z: wall.start.y },
+      { x: wall.end.x, z: wall.end.y },
+      wall.height,
+      wall.thickness,
+      false,
+    ),
+  );
+  plan2d.openings.forEach((opening) =>
+    createOpening(opening.type, opening.wallIndex, opening.t, false, opening, false),
+  );
+  state.undo.length = 0;
+  state.redo.length = 0;
+  const points = plan2d.walls.flatMap((wall) => [wall.start, wall.end]);
+  const center = points.length
+    ? {
+        x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+        y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+      }
+    : { x: 0, y: 0 };
+  camera.position.set(center.x, 1.7, center.y + 3);
+  camera.lookAt(center.x, 1.7, center.y);
+  document.querySelector("#project-name").value = "My Floor Plan";
+  document.querySelector("#plan-2d").classList.add("hidden");
+  projectStarted = true;
+  controls.lock();
+});
+document.querySelector("#enter-world").addEventListener("click", () => {
+  if (projectStarted) controls.lock();
+  else startBlank3d();
+});
+
 state.undo.length = 0;
 rebuildGrid(state.units);
 updateOutputs();
