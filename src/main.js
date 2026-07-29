@@ -1388,11 +1388,13 @@ function buildApartmentPlan() {
   addOpening("window", livingTop, 21.5, 73.25, 48, 36);
   addOpening("door", livingTop, 101.25, 34.75, 84);
   addWall(0, 0, 0, 313.25);
-  const kitchenBottom = addWall(0, 313.25, 145.5, 313.25);
-  addOpening("door", kitchenBottom, 109.5, 36, 84);
-  addWall(145.5, 313.25, 145.5, 339.5);
-  addWall(145.5, 339.5, 279.5, 339.5);
-  addWall(279.5, -11.25, 279.5, 339.5);
+  addWall(0, 313.25, 126.5, 313.25);
+  addWall(126.5, 313.25, 126.5, 346.25);
+  addWall(126.5, 346.25, 145.5, 346.25);
+  const entryWall = addWall(145.5, 346.25, 206.5, 346.25);
+  addOpening("door", entryWall, 7, 36, 84);
+  addWall(206.5, 346.25, 279.5, 346.25);
+  addWall(279.5, -11.25, 279.5, 346.25);
 
   // Bedroom, hall, bathroom, laundry, and closet partitions.
   addWall(145.5, -11.25, 145.5, 142.5);
@@ -1402,33 +1404,34 @@ function buildApartmentPlan() {
   const bedroomBottom = addWall(145.5, 142.5, 279.5, 142.5);
   addOpening("door", bedroomBottom, 11.25, 30.75, 84);
   addOpening("door", bedroomBottom, 83, 30, 84);
-  const hallSide = addWall(214.5, 142.5, 214.5, 184.5);
+  const hallSide = addWall(196.25, 142.5, 196.25, 184.5);
   addOpening("door", hallSide, 6, 30, 84);
-  addWall(176.75, 184.5, 214.5, 184.5);
-  const bathLeft = addWall(176.75, 184.5, 176.75, 250.5);
+  addWall(158.5, 184.5, 196.25, 184.5);
+  const bathLeft = addWall(158.5, 184.5, 158.5, 256.5);
   addOpening("door", bathLeft, 30, 30, 84);
-  const bathBottom = addWall(176.75, 250.5, 279.5, 250.5);
-  addOpening("door", bathBottom, 25.25, 30, 84);
-  addWall(206.5, 250.5, 206.5, 339.5);
-  addWall(176.75, 284.5, 206.5, 284.5);
+  const bathBottom = addWall(158.5, 256.5, 279.5, 256.5);
+  addOpening("door", bathBottom, 48, 34, 84);
+  addWall(158.5, 256.5, 158.5, 346.25);
+  addWall(206.5, 256.5, 206.5, 346.25);
+  addWall(158.5, 291.5, 206.5, 291.5);
   addWall(0, 184.5, 27, 184.5);
 
   // Apartment-owned kitchen: L counter, island, sink, range, and refrigerator.
-  addFixtureBounds("counter", "Kitchen counter", 0, 184.5, 25, 288.25, 36);
-  addFixtureBounds("counter", "Kitchen counter", 0, 288.25, 82.75, 313.25, 36);
-  addFixtureBounds("island", "Kitchen island", 67, 195, 109, 271.5, 36);
-  addFixtureBounds("appliance", "Refrigerator", 112, 278.25, 142, 313.25, 72);
+  addFixtureBounds("counter", "Kitchen counter", 3, 187.5, 25, 288.25, 36);
+  addFixtureBounds("counter", "Kitchen counter", 3, 288.25, 96.5, 310.25, 36);
+  addFixtureBounds("island", "Kitchen island", 55, 202, 97, 278.5, 36);
+  addFixtureBounds("appliance", "Refrigerator", 98.5, 276.25, 124.5, 311.25, 72);
 
   // Bathroom fixtures.
-  addFixtureBounds("tub", "Bathtub", 179.75, 187.5, 209.75, 247.5, 20);
-  addFixtureBounds("vanity", "Bathroom vanity", 252.5, 150.5, 276.5, 208.5, 34);
-  addFixtureBounds("toilet", "Toilet", 244, 214, 269, 244, 28);
+  addFixtureBounds("tub", "Bathtub", 161.5, 193.5, 191.5, 253.5, 20);
+  addFixtureBounds("vanity", "Bathroom vanity", 253.5, 149.5, 276.5, 208.5, 34);
+  addFixtureBounds("toilet", "Toilet", 244, 220, 269, 250, 28);
 
   // Laundry appliances and permanent closet storage.
-  addFixtureBounds("washer", "Washer", 178.5, 252.5, 204.5, 282.5, 38);
-  addFixtureBounds("dryer", "Dryer", 178.5, 286.5, 204.5, 316.5, 38);
-  addFixtureBounds("shelf", "Closet shelf", 258.5, 256.5, 276.5, 326.5, 18);
-  addFixtureBounds("shelf", "Closet shelf", 212.5, 318.5, 258.5, 336.5, 18);
+  addFixtureBounds("washer", "Washer", 167.5, 259, 197.5, 289, 38);
+  addFixtureBounds("dryer", "Dryer", 167.5, 294, 197.5, 324, 38);
+  addFixtureBounds("shelf", "Closet shelf", 258.5, 260, 276.5, 327, 18);
+  addFixtureBounds("shelf", "Closet shelf", 214.5, 326.25, 258.5, 344.25, 18);
 
   document.querySelector("#project-name").value = "Apartment Floor Plan";
   camera.position.set(apartmentPoint(96, 160).x, 1.7, apartmentPoint(96, 160).z);
