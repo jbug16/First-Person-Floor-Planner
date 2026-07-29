@@ -262,8 +262,10 @@ input[type="range"] { width: 100%; margin: 9px 0 14px; accent-color: #d89549; }
 .plan-tool:hover { background: #2c3237; }
 .plan-tool.active { color: #191c1f; background: #d89549; border-color: #d89549; }
 .plan-tool small { color: #929c9e; font-size: 10px; }
+.plan-tool strong { display: flex; align-items: center; justify-content: space-between; }
 .plan-tool.active small { color: #594126; }
 #plan-help { margin-top: 18px; color: #a5adae; font-size: 11px; line-height: 1.5; }
+.plan-shortcuts { color: #6f797b; font: 9px DM Mono; line-height: 1.7; }
 .plan-canvas-wrap { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 #plan-canvas { display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
 .plan-scale {
@@ -287,6 +289,20 @@ input[type="range"] { width: 100%; margin: 9px 0 14px; accent-color: #d89549; }
   border-radius: 3px;
 }
 .plan-properties hr { width: 100%; border: 0; border-top: 1px solid #3e454a; }
+#selection-fields {
+  padding: 11px;
+  background: #191c20;
+  border: 1px solid #d89549;
+}
+#selection-fields strong { display: block; margin-bottom: 9px; }
+#clear-selection {
+  width: 100%;
+  padding: 7px;
+  color: #f3f0e8;
+  background: #30363c;
+  border: 1px solid #535c62;
+  cursor: pointer;
+}
 .plan-properties .plan-check { display: flex; align-items: center; gap: 8px; }
 .plan-properties .plan-check input { width: auto; accent-color: #d89549; }
 .plan-summary {
@@ -301,8 +317,10 @@ input[type="range"] { width: 100%; margin: 9px 0 14px; accent-color: #d89549; }
 }
 .plan-summary span { color: #899294; font-size: 9px; line-height: 1.5; }
 .plan-wall { stroke: #22292b; stroke-linecap: square; }
+.plan-wall.selected { stroke: #d89549; }
 .plan-wall-hit { stroke: transparent; stroke-width: .35; cursor: pointer; }
 .plan-opening { stroke: #d65a4a; stroke-linecap: butt; pointer-events: stroke; cursor: pointer; }
+.plan-opening.selected { stroke: #d89549; }
 .plan-dimension {
   fill: #4f5958;
   paint-order: stroke;
