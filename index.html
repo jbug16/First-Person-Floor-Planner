@@ -82,10 +82,81 @@
       <div class="start-card" id="start-card">
         <span class="eyebrow">REAL-SCALE BUILD MODE</span>
         <h1>Walk it before<br />you build it.</h1>
-        <p>Every small square is 1 foot in imperial mode. Add walls, doors, and windows while exploring your plan at human scale.</p>
-        <button id="enter-world">Enter project</button>
+        <p>Start with a precise top-down plan or jump directly into an empty first-person project.</p>
+        <button id="open-2d">Create a 2D floor plan</button>
+        <button id="enter-world" class="secondary-action">Start blank in 3D</button>
         <small>WASD MOVE · 1–4 TOOLS · Z/Y UNDO/REDO · ESC RELEASE</small>
       </div>
+
+      <section id="plan-2d" class="plan-2d hidden" aria-label="2D floor plan editor">
+        <header class="plan-header">
+          <div>
+            <span class="eyebrow">OPTIONAL SETUP</span>
+            <h2>Draw your floor plan</h2>
+          </div>
+          <div class="plan-header-actions">
+            <button id="cancel-2d">Back</button>
+            <button id="finish-2d">Enter 3D</button>
+          </div>
+        </header>
+
+        <aside class="plan-tools">
+          <span class="plan-label">DRAW</span>
+          <button class="plan-tool active" data-plan-tool="wall"><strong>Wall</strong><small>Drag start to end</small></button>
+          <button class="plan-tool" data-plan-tool="room"><strong>Room</strong><small>Click to add exact size</small></button>
+          <button class="plan-tool" data-plan-tool="door"><strong>Door</strong><small>Click a wall</small></button>
+          <button class="plan-tool" data-plan-tool="window"><strong>Window</strong><small>Click a wall</small></button>
+          <button class="plan-tool" data-plan-tool="delete"><strong>Delete</strong><small>Click an item</small></button>
+          <p id="plan-help">Drag anywhere on the grid to draw a wall.</p>
+        </aside>
+
+        <div class="plan-canvas-wrap">
+          <svg id="plan-canvas" viewBox="-10 -8 20 16" aria-label="Top-down floor plan canvas">
+            <defs>
+              <pattern id="minor-grid" width=".3048" height=".3048" patternUnits="userSpaceOnUse">
+                <path d="M .3048 0 L 0 0 0 .3048" fill="none" stroke="#c4cac8" stroke-width=".012"/>
+              </pattern>
+              <pattern id="major-grid" width="1.524" height="1.524" patternUnits="userSpaceOnUse">
+                <rect width="1.524" height="1.524" fill="url(#minor-grid)"/>
+                <path d="M 1.524 0 L 0 0 0 1.524" fill="none" stroke="#7f8a88" stroke-width=".025"/>
+              </pattern>
+            </defs>
+            <rect x="-50" y="-50" width="100" height="100" fill="url(#major-grid)"/>
+            <g id="plan-shapes"></g>
+            <g id="plan-preview"></g>
+          </svg>
+          <div class="plan-scale">Small grid: 1 ft · Heavy grid: 5 ft</div>
+        </div>
+
+        <aside class="plan-properties">
+          <span class="plan-label">EXACT SIZE</span>
+          <label>Measurement unit
+            <select id="plan-unit">
+              <option value="ft">Feet</option>
+              <option value="in">Inches</option>
+              <option value="m">Meters</option>
+              <option value="cm">Centimeters</option>
+            </select>
+          </label>
+          <div id="wall-fields">
+            <label>Wall length <input id="plan-length" type="number" min="0" step=".01" placeholder="Use dragged length"/></label>
+          </div>
+          <div id="room-fields" class="hidden">
+            <label>Room width <input id="room-width" type="number" min=".1" step=".01" value="12"/></label>
+            <label>Room depth <input id="room-depth" type="number" min=".1" step=".01" value="10"/></label>
+          </div>
+          <div id="opening-fields" class="hidden">
+            <label>Opening width <input id="opening-width" type="number" min=".1" step=".01" value="3"/></label>
+            <label>Opening height <input id="opening-height" type="number" min=".1" step=".01" value="7"/></label>
+            <label id="sill-field" class="hidden">Sill height <input id="opening-sill" type="number" min="0" step=".01" value="3"/></label>
+          </div>
+          <hr/>
+          <label>Wall height <input id="plan-wall-height" type="number" min=".1" step=".01" value="8"/></label>
+          <label>Wall thickness <input id="plan-wall-thickness" type="number" min=".01" step=".01" value=".5"/></label>
+          <label class="plan-check"><input id="plan-snap" type="checkbox" checked/> Snap to grid</label>
+          <div class="plan-summary"><strong id="plan-count">0 walls · 0 openings</strong><span>Dimensions are converted to real-world scale in 3D.</span></div>
+        </aside>
+      </section>
 
       <footer class="statusbar">
         <span><i class="status-dot"></i> BUILD MODE</span>
