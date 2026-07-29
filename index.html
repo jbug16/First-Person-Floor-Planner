@@ -102,12 +102,13 @@
 
         <aside class="plan-tools">
           <span class="plan-label">DRAW</span>
-          <button class="plan-tool active" data-plan-tool="wall"><strong>Wall</strong><small>Drag start to end</small></button>
-          <button class="plan-tool" data-plan-tool="room"><strong>Room</strong><small>Click to add exact size</small></button>
-          <button class="plan-tool" data-plan-tool="door"><strong>Door</strong><small>Click a wall</small></button>
-          <button class="plan-tool" data-plan-tool="window"><strong>Window</strong><small>Click a wall</small></button>
-          <button class="plan-tool" data-plan-tool="delete"><strong>Delete</strong><small>Click an item</small></button>
+          <button class="plan-tool active" data-plan-tool="wall"><strong>Wall <kbd>1</kbd></strong><small>Drag start to end</small></button>
+          <button class="plan-tool" data-plan-tool="room"><strong>Room <kbd>R</kbd></strong><small>Click to add exact size</small></button>
+          <button class="plan-tool" data-plan-tool="door"><strong>Door <kbd>2</kbd></strong><small>Click a wall</small></button>
+          <button class="plan-tool" data-plan-tool="window"><strong>Window <kbd>3</kbd></strong><small>Click a wall</small></button>
+          <button class="plan-tool" data-plan-tool="delete"><strong>Delete <kbd>4</kbd></strong><small>Click an item</small></button>
           <p id="plan-help">Drag anywhere on the grid to draw a wall.</p>
+          <p class="plan-shortcuts">Z/Y UNDO/REDO · G SNAP · U UNITS · ESC CANCEL</p>
         </aside>
 
         <div class="plan-canvas-wrap">
@@ -149,6 +150,11 @@
             <label>Opening width <input id="opening-width" type="number" min=".1" step=".01" value="3"/></label>
             <label>Opening height <input id="opening-height" type="number" min=".1" step=".01" value="7"/></label>
             <label id="sill-field" class="hidden">Sill height <input id="opening-sill" type="number" min="0" step=".01" value="3"/></label>
+          </div>
+          <div id="selection-fields" class="hidden">
+            <span class="plan-label">SELECTED ITEM</span>
+            <strong id="selection-name">Wall</strong>
+            <button id="clear-selection">Done editing</button>
           </div>
           <hr/>
           <label>Wall height <input id="plan-wall-height" type="number" min=".1" step=".01" value="8"/></label>
